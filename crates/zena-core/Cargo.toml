@@ -10,5 +10,8 @@ license.workspace = true
 premium-discount-sensor.workspace = true
 # Window style bits, viewport, hover alpha, frame budget (shared with premium-discount-app's overlay)
 premium-discount-window.workspace = true
+# 언어팩 (페르소나 · 프롬프트 틀 · 큐 대사) 과 코스 줄의 추천 말투
+zena-locale = { path = "../zena-locale" }
+zena-verdict = { path = "../zena-verdict" }
 serde.workspace = true
 serde_json.workspace = true

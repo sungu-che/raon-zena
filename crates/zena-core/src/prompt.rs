@@ -83,6 +83,74 @@ impl Dialogue {
     }
 }
 
+/// Where the player is on their current course (premium-discount's time-trial: checkpoints, ghost, friction),
+/// language-neutral: the language pack (`zena_locale`) turns it into the `[코스]` line.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct CourseBrief {
+    /// Course chain hash up to the current checkpoint (premium-discount-nav `Step::course`)
+    pub course_id: String,
+    /// The current checkpoint's display name (already scrubbed of personal data)
+    pub checkpoint_label: String,
+    /// Split time against the ghost (my best run or the public one): negative = ahead, positive = behind
+    pub ghost_delta_ms: Option<i64>,
+    /// The checkpoint `pd_nav_number` puts first next, with the local and the global tier
+    pub next_recommended: Option<NextCheckpoint>,
+    /// This section's friction is high (premium-discount-nav `FrictionBaselines::decide` gave discount)
+    pub high_friction: bool,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct NextCheckpoint {
+    pub label: String,
+    pub local: Option<zena_verdict::Tier>,
+    pub global: Option<zena_verdict::Tier>,
+}
+
+impl CourseBrief {
+    /// The `[코스]` line's content (no block name), in the current language pack
+    pub fn render(&self) -> String {
+        self.render_in(&zena_locale::current())
+    }
+
+    pub fn render_in(&self, l: &zena_locale::Locale) -> String {
+        let fill = zena_locale::fill;
+        let mut parts = Vec::new();
+        if !self.checkpoint_label.is_empty() {
+            parts.push(fill(l.prompt("course_checkpoint"), &[("label", &self.checkpoint_label)]));
+        }
+        if let Some(d) = self.ghost_delta_ms {
+            let secs = format!("{:.1}", d.unsigned_abs() as f64 / 1000.0);
+            parts.push(match d {
+                d if d.abs() < 50 => l.prompt("course_even").to_string(),
+                d if d < 0 => fill(l.prompt("course_ahead"), &[("secs", &secs)]),
+                _ => fill(l.prompt("course_behind"), &[("secs", &secs)]),
+            });
+        }
+        if let Some(n) = &self.next_recommended {
+            let word = |t: zena_verdict::Tier| match t {
+                zena_verdict::Tier::Premium => l.speak("premium").to_string(),
+                zena_verdict::Tier::Discount => l.speak("discount").to_string(),
+                zena_verdict::Tier::Neutral => l.speak("neutral").to_string(),
+                zena_verdict::Tier::Unrated => String::new(),
+            };
+            let stance = match zena_verdict::stance(n.local, n.global) {
+                zena_verdict::Stance::Agree(t) | zena_verdict::Stance::LocalOnly(t) | zena_verdict::Stance::GlobalOnly(t) => word(t),
+                zena_verdict::Stance::Differ { local, global } => format!("{}/{}", word(local), word(global)),
+                zena_verdict::Stance::FactsOnly => String::new(),
+            };
+            parts.push(if stance.is_empty() {
+                fill(l.prompt("course_next"), &[("label", &n.label)])
+            } else {
+                fill(l.prompt("course_next_stance"), &[("label", &n.label), ("stance", &stance)])
+            });
+        }
+        if self.high_friction {
+            parts.push(l.prompt("course_friction").to_string());
+        }
+        parts.join(l.prompt("join"))
+    }
+}
+
 /// What Zena knows about the play session, rendered as one compact block so her tone follows it.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct SessionContext {
@@ -99,66 +167,86 @@ pub struct SessionContext {
     /// Recommendations for what is on screen: one line per record (at most 3), each saying the local and the
     /// global verdict side by side (`zena_verdict::Stance::line`). Empty: nothing to recommend.
     pub verdicts: Vec<String>,
+    /// The current course and checkpoint (premium-discount time-trial), when Zena knows one
+    pub course: Option<CourseBrief>,
 }
 
 impl SessionContext {
     pub fn render(&self) -> String {
+        self.render_in(&zena_locale::current())
+    }
+
+    /// [`Self::render`] in a given language pack
+    pub fn render_in(&self, l: &zena_locale::Locale) -> String {
+        let fill = zena_locale::fill;
         let mut parts = Vec::new();
         if let Some(s) = &self.scene {
             let m = self.scene_secs / 60;
             parts.push(if m > 0 {
-                format!("화면: {s} ({m}분째)")
+                fill(l.prompt("scene_minutes"), &[("scene", s), ("minutes", &m.to_string())])
             } else {
-                format!("화면: {s}")
+                fill(l.prompt("scene"), &[("scene", s)])
             });
         }
         if self.defeat_streak > 0 {
-            parts.push(format!("연속 패배 {}회", self.defeat_streak));
+            parts.push(fill(l.prompt("defeat_streak"), &[("n", &self.defeat_streak.to_string())]));
         }
         if self.victory_streak > 0 {
-            parts.push(format!("연속 승리 {}회", self.victory_streak));
+            parts.push(fill(l.prompt("victory_streak"), &[("n", &self.victory_streak.to_string())]));
         }
         parts.push(
             match self.affinity {
-                a if a >= 0.66 => "친밀도 높음",
-                a if a >= 0.33 => "친밀도 보통",
-                _ => "친밀도 낮음",
+                a if a >= 0.66 => l.prompt("affinity_high"),
+                a if a >= 0.33 => l.prompt("affinity_mid"),
+                _ => l.prompt("affinity_low"),
             }
             .to_string(),
         );
         if self.tension >= 0.5 {
-            parts.push("긴장도 높음".into());
+            parts.push(l.prompt("tension_high").to_string());
         }
-        let mut s = format!("[세션] {}\n", parts.join(" / "));
-        if let Some(t) = self.tone() {
-            s.push_str(&format!("[말투] {t}\n"));
+        let mut s = format!("{} {}\n", l.prompt("block_session"), parts.join(l.prompt("join")));
+        if let Some(t) = self.tone_in(l) {
+            s.push_str(&format!("{} {t}\n", l.prompt("block_tone")));
         }
         for v in self.verdicts.iter().take(3) {
-            s.push_str(&format!("[추천] {v}\n"));
+            s.push_str(&format!("{} {v}\n", l.prompt("block_recommend")));
+        }
+        if let Some(c) = &self.course {
+            let line = c.render_in(l);
+            if !line.is_empty() {
+                s.push_str(&format!("{} {line}\n", l.prompt("block_course")));
+            }
         }
         s
     }
 
-    /// The tone hint the summary implies.
-    pub fn tone(&self) -> Option<&'static str> {
-        if self.defeat_streak >= 3 {
-            Some("계속 지고 있다. 다그치지 말고 먼저 위로하고, 쉬어 가자고 제안한다.")
+    /// The tone hint the summary implies (current language pack).
+    pub fn tone(&self) -> Option<String> {
+        self.tone_in(&zena_locale::current())
+    }
+
+    pub fn tone_in(&self, l: &zena_locale::Locale) -> Option<String> {
+        let key = if self.defeat_streak >= 3 {
+            "tone_defeats"
         } else if self.tension >= 0.7 {
-            Some("급박하다. 아주 짧고 단호하게 말한다.")
+            "tone_tense"
         } else if self.victory_streak >= 2 {
-            Some("연승 중이다. 신나게 칭찬한다.")
+            "tone_streak"
         } else if self.affinity >= 0.66 {
-            Some("친한 사이다. 편한 반말로 장난스럽게 말한다.")
+            "tone_close"
         } else {
-            None
-        }
+            return None;
+        };
+        Some(l.prompt(key).to_string())
     }
 }
 
-pub const SYSTEM_PERSONA: &str = "너는 게임 화면 옆에 떠 있는 버튜버 컴패니언 '제나(Zena)'다. \
-플레이어를 짧고 다정하게 코칭한다. 대사는 한 문장, 90자 이내. \
-반드시 control_zena_avatar 도구로 시선·표정·동작·대사를 함께 지정하고, \
-창/앱 제어 요청일 때만 manage_zena_system 을 호출한다.";
+/// Zena's system persona in the current language pack. It goes into the cached system prefix, so a backend that
+/// cached the prefix must rebuild it after the language changes.
+pub fn system_persona() -> String {
+    zena_locale::current().persona.clone()
+}
 
 /// Compact, model-readable description of the situation for one Lv3 call.
 #[derive(Debug, Clone, Default)]
@@ -175,42 +263,47 @@ pub struct Situation {
     pub session: Option<SessionContext>,
 }
 
-fn direction_ko(theta: f32) -> &'static str {
-    const NAMES: [&str; 8] = ["오른쪽", "오른쪽 위", "위", "왼쪽 위", "왼쪽", "왼쪽 아래", "아래", "오른쪽 아래"];
-    NAMES[(((theta + 22.5) % 360.0) / 45.0) as usize % 8]
+/// Direction name of an angle in the current language pack (eight 45° sectors, 0 = right, counter-clockwise)
+pub fn direction(theta: f32) -> String {
+    zena_locale::current().direction(theta).to_string()
 }
 
 impl Situation {
     pub fn render(&self) -> String {
+        self.render_in(&zena_locale::current())
+    }
+
+    /// [`Self::render`] in a given language pack
+    pub fn render_in(&self, l: &zena_locale::Locale) -> String {
         let mut s = String::new();
         if !self.history.is_empty() {
-            s.push_str("[최근 대화]\n");
+            s.push_str(&format!("{}\n", l.prompt("block_history")));
             for t in &self.history {
                 if let Some(u) = &t.user {
-                    s.push_str(&format!("플레이어: {u}\n"));
+                    s.push_str(&format!("{}: {u}\n", l.prompt("speaker_player")));
                 }
-                s.push_str(&format!("제나: {}\n", t.zena));
+                s.push_str(&format!("{}: {}\n", l.prompt("speaker_zena"), t.zena));
             }
         }
         if let Some(c) = &self.session {
-            s.push_str(&c.render());
+            s.push_str(&c.render_in(l));
         }
         if let Some(q) = &self.user_query {
-            s.push_str(&format!("[플레이어 질문] {q}\n"));
+            s.push_str(&format!("{} {q}\n", l.prompt("block_question")));
         }
-        if let Some(l) = &self.event_label {
-            s.push_str(&format!("[화면 이벤트] {l}"));
+        if let Some(e) = &self.event_label {
+            s.push_str(&format!("{} {e}", l.prompt("block_event")));
             if let Some(p) = self.polar {
                 let dist = if p.r < 0.22 {
-                    "바로 코앞"
+                    l.prompt("dist_near")
                 } else if p.r < 0.5 {
-                    "중거리"
+                    l.prompt("dist_mid")
                 } else {
-                    "멀리"
+                    l.prompt("dist_far")
                 };
                 s.push_str(&format!(
                     " / {} {} (angle_deg={:.0}, distance_norm={:.2})",
-                    direction_ko(p.theta_deg),
+                    l.direction(p.theta_deg),
                     dist,
                     p.theta_deg,
                     p.r
@@ -218,18 +311,18 @@ impl Situation {
             }
             if let Some(f) = self.flow {
                 s.push_str(match f {
-                    FlowDirection::Inward => " / 접근 중",
-                    FlowDirection::Outward => " / 플레이어 공격",
+                    FlowDirection::Inward => l.prompt("flow_inward"),
+                    FlowDirection::Outward => l.prompt("flow_outward"),
                     _ => "",
                 });
             }
             s.push('\n');
         }
         if let Some(hp) = self.hp_ratio {
-            s.push_str(&format!("[HP] {:.0}%\n", hp * 100.0));
+            s.push_str(&format!("{} {:.0}%\n", l.prompt("block_hp"), hp * 100.0));
         }
         for c in &self.context {
-            s.push_str(&format!("[참고] {c}\n"));
+            s.push_str(&format!("{} {c}\n", l.prompt("block_reference")));
         }
         s
     }
@@ -243,7 +336,7 @@ pub fn build_fast_path_prompt(sit: &Situation) -> String {
         p.push_str(&t.to_string());
     }
     p.push_str("\n</tools>\n\nIf you choose to call a function ONLY reply in the following format with NO suffix:\n\n<tool_call>\n<function=example_function_name>\n<parameter=example_parameter_1>\nvalue_1\n</parameter>\n</function>\n</tool_call>\n\n");
-    p.push_str(SYSTEM_PERSONA);
+    p.push_str(&system_persona());
     p.push_str("<|im_end|>\n<|im_start|>user\n");
     p.push_str(sit.render().trim_end());
     p.push_str("<|im_end|>\n<|im_start|>assistant\n<think></think>\n\n");
@@ -267,8 +360,8 @@ mod tests {
         assert!(p.contains("control_zena_avatar"));
         assert!(p.contains("오른쪽 바로 코앞"));
         assert!(p.contains("[HP] 12%"));
-        assert_eq!(direction_ko(350.0), "오른쪽");
-        assert_eq!(direction_ko(135.0), "왼쪽 위");
+        assert_eq!(direction(350.0), "오른쪽");
+        assert_eq!(direction(135.0), "왼쪽 위");
     }
 
     #[test]
@@ -310,6 +403,52 @@ mod tests {
         assert_eq!(d.turns()[0].user.as_ref().unwrap().chars().count(), 61);
         d.push(None, "  ");
         assert_eq!(d.len(), 1, "nothing said, nothing remembered");
+    }
+
+    #[test]
+    fn the_course_line_follows_the_recommendations() {
+        let course = CourseBrief {
+            course_id: "0xcourse".into(),
+            checkpoint_label: "쿠폰 입력".into(),
+            ghost_delta_ms: Some(-800),
+            next_recommended: Some(NextCheckpoint { label: "간편결제".into(), local: Some(zena_verdict::Tier::Premium), global: Some(zena_verdict::Tier::Premium) }),
+            high_friction: true,
+        };
+        let ctx = SessionContext { verdicts: vec!["공략: 추천".into()], course: Some(course.clone()), ..Default::default() };
+        let s = ctx.render();
+        assert!(
+            s.ends_with("[추천] 공략: 추천\n[코스] 체크포인트 '쿠폰 입력' / 고스트보다 0.8초 빠름 / 다음 추천 '간편결제' (추천) / 이 구간에서 막혀 있다 (마찰 큼)\n"),
+            "{s}"
+        );
+        let behind = CourseBrief { ghost_delta_ms: Some(1250), next_recommended: None, high_friction: false, ..course.clone() };
+        assert_eq!(behind.render(), "체크포인트 '쿠폰 입력' / 고스트보다 1.2초 느림");
+        let differ = CourseBrief {
+            ghost_delta_ms: Some(20),
+            next_recommended: Some(NextCheckpoint { label: "A".into(), local: Some(zena_verdict::Tier::Premium), global: Some(zena_verdict::Tier::Discount) }),
+            ..course.clone()
+        };
+        assert!(differ.render().contains("고스트와 같은 속도 / 다음 추천 'A' (추천/비추천)"));
+        let unrated = CourseBrief { next_recommended: Some(NextCheckpoint { label: "B".into(), local: None, global: Some(zena_verdict::Tier::Unrated) }), ..CourseBrief::default() };
+        assert_eq!(unrated.render(), "다음 추천 'B'");
+        assert!(!SessionContext::default().render().contains("[코스]"));
+    }
+
+    #[test]
+    fn another_language_pack_changes_every_line_but_not_the_layout() {
+        let en = zena_locale::get("en").unwrap();
+        let s = Situation {
+            event_label: Some("boss".into()),
+            polar: Some(Polar { r: 0.1, theta_deg: 10.0 }),
+            hp_ratio: Some(0.12),
+            user_query: Some("how do I dodge?".into()),
+            session: Some(SessionContext { scene: Some("boss fight".into()), scene_secs: 754, defeat_streak: 3, ..Default::default() }),
+            ..Default::default()
+        };
+        let user = s.render_in(&en);
+        assert!(user.starts_with("[session] Screen: boss fight (12 min) / 3 defeats in a row / new acquaintance\n[tone] They keep losing."), "{user}");
+        assert!(user.contains("[player question] how do I dodge?\n[screen event] boss / right right in front"), "{user}");
+        assert!(user.contains("[HP] 12%"));
+        assert!(!user.chars().any(|c| ('\u{AC00}'..='\u{D7A3}').contains(&c)), "no Korean left: {user}");
     }
 
     #[test]

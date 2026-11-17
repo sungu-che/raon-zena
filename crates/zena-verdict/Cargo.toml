@@ -7,6 +7,8 @@ license.workspace = true
 
 [dependencies]
 premium-discount-verdict.workspace = true
+# 추천 · 비추천 말투의 언어팩 (data/locales/<언어>.json 의 speak)
+zena-locale = { path = "../zena-locale" }
 
 [dev-dependencies]
 serde.workspace = true

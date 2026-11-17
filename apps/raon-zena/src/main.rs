@@ -15,6 +15,10 @@
 //!           [--vision out/raon-ve-vision.pyramid.gguf]   (residency report only)
 //!           [--proactive SECS]                      quiet time before Zena speaks up on her own (0: never; default 90)
 //!           [--history N]                           exchanges remembered for Lv3 prompts (default 4)
+//!           [--lang ko|en|…] [--locale-dir DIR]     Zena's language pack (persona, prompt, cues, verdict lines;
+//!                                                   data/locales/<code>.json, more packs from DIR; default ko)
+//!           [--no-pd] [--pd-share]                  premium-discount bridge (records, verdict lines; on when
+//!                                                   premium-discount-mcp is installed) / share feedback as votes
 //!           [--nlp auto|rules|v1]                   natural-language router: v2 with installed models (Stanza +
 //!                                                   granite + SDS), v1 + rule analyzer, or v1 (default auto)
 //!           [--track procedural|solidcraft|subculture-2d|subculture-3d]   the avatar body to start with
@@ -32,9 +36,11 @@
 
 mod assets;
 mod capture;
+mod course;
 mod lexicon;
 mod llm;
 mod overlay;
+mod pd_bridge;
 mod pipeline;
 mod renderers;
 mod snapshot;
@@ -74,6 +80,10 @@ struct Args {
     screen_format: Option<raon_vision::WeightFormat>,
     screen_device: raon_infer::device::Backend,
     proactive_s: u64,
+    lang: String,
+    locale_dir: Option<PathBuf>,
+    pd: bool,
+    pd_share: bool,
     history: usize,
     nlp: pipeline::NlpMode,
     track: zena_core::tools::AvatarTrack,
@@ -120,6 +130,10 @@ fn args() -> Args {
         screen_format: None,
         screen_device: raon_infer::device::Backend::Auto,
         proactive_s: 90,
+        lang: zena_locale::DEFAULT_LANGUAGE.into(),
+        locale_dir: None,
+        pd: true,
+        pd_share: false,
         history: 4,
         nlp: pipeline::NlpMode::Auto,
         track: zena_core::tools::AvatarTrack::Procedural,
@@ -164,6 +178,10 @@ fn args() -> Args {
             "--screen-device" => a.screen_device = it.next().unwrap_or_default().parse().unwrap_or(raon_infer::device::Backend::Auto),
             "--proactive" => a.proactive_s = it.next().and_then(|v| v.parse().ok()).unwrap_or(90),
             "--history" => a.history = it.next().and_then(|v| v.parse().ok()).unwrap_or(4),
+            "--lang" => a.lang = it.next().unwrap_or_else(|| zena_locale::DEFAULT_LANGUAGE.into()),
+            "--locale-dir" => a.locale_dir = it.next().map(PathBuf::from),
+            "--no-pd" => a.pd = false,
+            "--pd-share" => a.pd_share = true,
             "--nlp" => match it.next().unwrap_or_default().parse() {
                 Ok(m) => a.nlp = m,
                 Err(e) => eprintln!("{e}"),
@@ -226,6 +244,14 @@ mod serde_json_lite {
 
 fn main() -> Result<()> {
     let a = args();
+    // The language pack first: the LLM backend caches the system persona in its prompt prefix when it loads
+    if let Some(dir) = &a.locale_dir {
+        match zena_locale::load_dir(dir) {
+            Ok(codes) => eprintln!("[locale] loaded {codes:?} from {}", dir.display()),
+            Err(e) => bail!("language packs in {}: {e}", dir.display()),
+        }
+    }
+    zena_locale::set_language(&a.lang).map_err(anyhow::Error::msg)?;
     if let Some(dir) = &a.snapshot {
         return snapshot::run(dir, a.font.as_deref(), a.vrm.as_deref());
     }
@@ -397,6 +423,8 @@ fn main() -> Result<()> {
             proactive_silence_ms: a.proactive_s * 1000,
             history_turns: a.history,
             nlp: a.nlp,
+            language: zena_locale::current().code.clone(),
+            pd: a.pd.then(|| pipeline::PdOptions { share: a.pd_share }),
             ..Default::default()
         };
         let lexicon = loaded.lexicon;

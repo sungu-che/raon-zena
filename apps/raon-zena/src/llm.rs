@@ -158,32 +158,19 @@ impl LlmBackend for TemplateBackend {
 
 impl TemplateBackend {
     fn complete(s: &Situation) -> String {
+        // The lines come from the current language pack (`zena_locale`, `app.template_*`)
+        let l = zena_locale::current();
         let (emotion, motion, line) = if let Some(q) = &s.user_query {
-            if q.contains("물약") || q.contains("인벤") || q.contains("포션") {
-                (
-                    "FOCUSED",
-                    "THINK",
-                    "인벤토리는 I 키로 열 수 있어. 물약은 보통 소모품 칸에 있어!".to_string(),
-                )
+            if l.app_list("template_inventory_words").iter().any(|w| q.contains(w.as_str())) {
+                ("FOCUSED", "THINK", l.app("template_inventory").to_string())
             } else {
-                (
-                    "FOCUSED",
-                    "NOD",
-                    "패턴 시작 모션이 보이면 옆으로 구르고, 끝나면 바로 반격해!".to_string(),
-                )
+                ("FOCUSED", "NOD", l.app("template_tip").to_string())
             }
         } else if s.hp_ratio.is_some_and(|h| h < 0.3) {
-            (
-                "SURPRISED_URGENT",
-                "LEAN_FORWARD_POINT",
-                "체력이 위험해! 당장 회복하고 거리 벌려!".to_string(),
-            )
+            ("SURPRISED_URGENT", "LEAN_FORWARD_POINT", l.app("template_low_hp").to_string())
         } else {
-            (
-                "SURPRISED_URGENT",
-                "LEAN_FORWARD_POINT",
-                format!("{} 조심해!", s.event_label.clone().unwrap_or_else(|| "적".into())),
-            )
+            let what = s.event_label.clone().unwrap_or_else(|| l.app("template_enemy").to_string());
+            ("SURPRISED_URGENT", "LEAN_FORWARD_POINT", zena_locale::fill(l.app("template_careful"), &[("what", &what)]))
         };
         let gaze = s
             .polar
@@ -195,11 +182,16 @@ impl TemplateBackend {
     }
 }
 
+/// A step the LLM thread runs on the situation before generating (e.g. premium-discount's records and verdicts for a
+/// question). The prompt is rebuilt from the situation afterwards.
+pub type PrepareStep = Box<dyn FnOnce(&mut Situation) + Send>;
+
 /// A request for the LLM thread.
 pub struct LlmJob {
     pub prompt: String,
     pub situation: Situation,
     pub level: zena_core::reaction::ReactionLevel,
+    pub prepare: Option<PrepareStep>,
 }
 
 /// Loads a backend when it is first needed.
@@ -276,6 +268,11 @@ impl LlmWorker {
                             }
                         }
                     }
+                    let mut job = job;
+                    if let Some(step) = job.prepare.take() {
+                        step(&mut job.situation);
+                        job.prompt = build_fast_path_prompt(&job.situation);
+                    }
                     let out = backend
                         .as_mut()
                         .expect("loaded")
@@ -323,6 +320,7 @@ mod tests {
                 prompt: String::new(),
                 situation: Situation::default(),
                 level: zena_core::reaction::ReactionLevel::Lv3Coaching,
+                prepare: None,
             }) {
                 ok = true;
                 break;
@@ -356,6 +354,7 @@ mod tests {
                     prompt: String::new(),
                     situation: Situation::default(),
                     level: zena_core::reaction::ReactionLevel::Lv3Coaching,
+                    prepare: None,
                 }) {
                     return;
                 }

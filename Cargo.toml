@@ -10,6 +10,7 @@ members = [
     "crates/zena-avatar-mcp",
     "crates/zena-sds",
     "crates/zena-verdict",
+    "crates/zena-locale",
     "apps/raon-zena",
     "apps/zena-lexicon",
 ]

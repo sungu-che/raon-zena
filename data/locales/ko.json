@@ -1,0 +1,125 @@
+{
+ "code": "ko",
+ "name": "한국어",
+ "note": "제나의 한국어 언어팩. 프롬프트(zena-core prompt.rs) · 즉답 큐(cues.rs) · 추천 말투(zena-verdict speak.rs) · 앱 문구(apps/raon-zena)의 문장 틀이다. {이름} 자리는 코드가 채운다. 다른 나라 모델을 붙일 때는 이 파일을 복사해 번역하고 --lang 으로 고른다(코드 수정 없음).",
+ "persona": "너는 게임 화면 옆에 떠 있는 버튜버 컴패니언 '제나(Zena)'다. 플레이어를 짧고 다정하게 코칭한다. 대사는 한 문장, 90자 이내. 반드시 control_zena_avatar 도구로 시선·표정·동작·대사를 함께 지정하고, 창/앱 제어 요청일 때만 manage_zena_system 을 호출한다.",
+ "prompt": {
+  "scene": "화면: {scene}",
+  "scene_minutes": "화면: {scene} ({minutes}분째)",
+  "defeat_streak": "연속 패배 {n}회",
+  "victory_streak": "연속 승리 {n}회",
+  "affinity_high": "친밀도 높음",
+  "affinity_mid": "친밀도 보통",
+  "affinity_low": "친밀도 낮음",
+  "tension_high": "긴장도 높음",
+  "join": " / ",
+  "block_session": "[세션]",
+  "block_tone": "[말투]",
+  "block_recommend": "[추천]",
+  "block_course": "[코스]",
+  "block_history": "[최근 대화]",
+  "block_question": "[플레이어 질문]",
+  "block_event": "[화면 이벤트]",
+  "block_hp": "[HP]",
+  "block_reference": "[참고]",
+  "speaker_player": "플레이어",
+  "speaker_zena": "제나",
+  "tone_defeats": "계속 지고 있다. 다그치지 말고 먼저 위로하고, 쉬어 가자고 제안한다.",
+  "tone_tense": "급박하다. 아주 짧고 단호하게 말한다.",
+  "tone_streak": "연승 중이다. 신나게 칭찬한다.",
+  "tone_close": "친한 사이다. 편한 반말로 장난스럽게 말한다.",
+  "dist_near": "바로 코앞",
+  "dist_mid": "중거리",
+  "dist_far": "멀리",
+  "flow_inward": " / 접근 중",
+  "flow_outward": " / 플레이어 공격",
+  "course_checkpoint": "체크포인트 '{label}'",
+  "course_ahead": "고스트보다 {secs}초 빠름",
+  "course_behind": "고스트보다 {secs}초 느림",
+  "course_even": "고스트와 같은 속도",
+  "course_next": "다음 추천 '{label}'",
+  "course_next_stance": "다음 추천 '{label}' ({stance})",
+  "course_friction": "이 구간에서 막혀 있다 (마찰 큼)"
+ },
+ "directions": [
+  "오른쪽",
+  "오른쪽 위",
+  "위",
+  "왼쪽 위",
+  "왼쪽",
+  "왼쪽 아래",
+  "아래",
+  "오른쪽 아래"
+ ],
+ "cues": {
+  "NICE_HIT": [
+   "나이스!",
+   "좋았어!",
+   "명중!"
+  ],
+  "CAREFUL": [
+   "조심!",
+   "온다!",
+   "피해!"
+  ],
+  "HIT_ON_COOLDOWN": [
+   "아야, 버텨!",
+   "쿨 돌 때까지만!"
+  ],
+  "MID_RANGE_FIGHT": [
+   "간다!",
+   "집중!"
+  ]
+ },
+ "speak": {
+  "premium": "추천",
+  "discount": "비추천",
+  "neutral": "보통",
+  "agree": "{label}: 내 기록과 서버 평가 모두 {tier}",
+  "differ": "{label}: 내 기록에선 {local}인데 서버에선 {global} (둘 다 말할 것)",
+  "local_only": "{label}: 내 기록으로는 {tier} (서버 판정 전)",
+  "global_only": "{label}: 다른 사용자들은 {tier} (내 기록은 판정 전)",
+  "facts_only": "{label}: 판정 전 (추천·비추천이라고 말하지 말고 있었던 일만)"
+ },
+ "app": {
+  "screen_now": "지금 화면: {what} (확신도 {pct}%)",
+  "screen_unknown": "지금 화면은 아직 모른다.",
+  "market_empathy": "투자 조언(사라/팔아라)은 하지 말고 플레이어의 기분에 공감한다.",
+  "event_close_threat": "근접 위협",
+  "event_monster": "몬스터 접근",
+  "event_skill": "스킬 시전",
+  "event_motion": "움직임",
+  "superseded": "{label}: 더 새 기록이 있어 이 내용은 지난 것이다",
+  "template_inventory_words": [
+   "물약",
+   "인벤",
+   "포션"
+  ],
+  "template_inventory": "인벤토리는 I 키로 열 수 있어. 물약은 보통 소모품 칸에 있어!",
+  "template_tip": "패턴 시작 모션이 보이면 옆으로 구르고, 끝나면 바로 반격해!",
+  "template_low_hp": "체력이 위험해! 당장 회복하고 거리 벌려!",
+  "template_careful": "{what} 조심해!",
+  "template_enemy": "적",
+  "feedback_recommend": [
+   "추천",
+   "좋았어",
+   "덕분에 깼다",
+   "덕분에 깼어",
+   "통했어",
+   "도움 됐어",
+   "도움됐어",
+   "잘 됐어",
+   "고마워 그거"
+  ],
+  "feedback_not_recommend": [
+   "비추천",
+   "비추",
+   "별로",
+   "안 통해",
+   "틀렸어",
+   "소용없",
+   "도움 안 돼",
+   "엉터리"
+  ]
+ }
+}

@@ -1,0 +1,10 @@
+[package]
+name = "zena-locale"
+description = "제나의 언어팩: 페르소나 · 프롬프트 틀 · 즉답 큐 · 추천 말투 · 앱 문구 (data/locales/<언어>.json)"
+version = "0.1.0"
+edition = "2021"
+license = "Apache-2.0"
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true

@@ -15,6 +15,18 @@ raon-vision = { path = "../../crates/raon-vision" }
 zena-lexicon = { path = "../../crates/zena-lexicon" }
 zena-avatar-mcp = { path = "../../crates/zena-avatar-mcp" }
 zena-sds = { path = "../../crates/zena-sds" }
+# 언어팩 · 추천 말투 · premium-discount 다리 (검색 · 표 · 동기화, Relay 신구 대체, 문장 분석)
+zena-locale = { path = "../../crates/zena-locale" }
+zena-verdict = { path = "../../crates/zena-verdict" }
+premium-discount-mcp.workspace = true
+premium-discount-relay.workspace = true
+premium-discount-nms.workspace = true
+# 게임 화면 코스 (타임트라이얼 체크포인트 · 기록실 · 고스트)
+premium-discount-nav.workspace = true
+# 앞 창의 앱 (질문 검색의 범위 cc): Win32 앞 창 찾기
+premium-discount-window = { workspace = true, features = ["win32"] }
+serde.workspace = true
+serde_json.workspace = true
 ab_glyph = "0.2"
 image = { version = "0.25", default-features = false, features = ["png"] }
 anyhow = "1"

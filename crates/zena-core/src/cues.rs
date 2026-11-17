@@ -1,5 +1,6 @@
 //! Lv2 pre-cached cues: short lines whose audio is synthesised once at start-up and replayed
-//! with no LLM call.
+//! with no LLM call. The lines come from the current language pack (`zena_locale`, `cues.<KIND>`); the emotion
+//! and motion stay here.
 
 use crate::tools::{BodyMotion, EmotionState};
 use serde::{Deserialize, Serialize};
@@ -13,11 +14,26 @@ pub enum CueKind {
     MidRangeFight,
 }
 
+impl CueKind {
+    /// The language pack key (`cues.NICE_HIT` …)
+    pub fn key(self) -> &'static str {
+        match self {
+            CueKind::NiceHit => "NICE_HIT",
+            CueKind::Careful => "CAREFUL",
+            CueKind::HitOnCooldown => "HIT_ON_COOLDOWN",
+            CueKind::MidRangeFight => "MID_RANGE_FIGHT",
+        }
+    }
+
+    /// Alternatives rotated round-robin so repeats do not sound robotic (current language pack)
+    pub fn lines(self) -> Vec<String> {
+        zena_locale::current().cue_lines(self.key()).to_vec()
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct Cue {
     pub kind: CueKind,
-    /// Alternatives rotated round-robin so repeats do not sound robotic.
-    pub lines: &'static [&'static str],
     pub emotion: EmotionState,
     pub motion: BodyMotion,
 }
@@ -25,25 +41,21 @@ pub struct Cue {
 pub const CUES: &[Cue] = &[
     Cue {
         kind: CueKind::NiceHit,
-        lines: &["나이스!", "좋았어!", "명중!"],
         emotion: EmotionState::Joy,
         motion: BodyMotion::Cheer,
     },
     Cue {
         kind: CueKind::Careful,
-        lines: &["조심!", "온다!", "피해!"],
         emotion: EmotionState::Surprised,
         motion: BodyMotion::Flinch,
     },
     Cue {
         kind: CueKind::HitOnCooldown,
-        lines: &["아야, 버텨!", "쿨 돌 때까지만!"],
         emotion: EmotionState::Worried,
         motion: BodyMotion::Flinch,
     },
     Cue {
         kind: CueKind::MidRangeFight,
-        lines: &["간다!", "집중!"],
         emotion: EmotionState::Focused,
         motion: BodyMotion::Nod,
     },
@@ -60,10 +72,10 @@ pub struct CuePlayer {
 }
 
 impl CuePlayer {
-    pub fn next_line(&mut self, kind: CueKind) -> &'static str {
-        let c = cue(kind);
+    pub fn next_line(&mut self, kind: CueKind) -> String {
+        let lines = kind.lines();
         let slot = &mut self.counters[kind as usize];
-        let line = c.lines[*slot % c.lines.len()];
+        let line = lines.get(*slot % lines.len().max(1)).cloned().unwrap_or_default();
         *slot += 1;
         line
     }

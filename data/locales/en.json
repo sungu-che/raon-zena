@@ -1,0 +1,121 @@
+{
+ "code": "en",
+ "name": "English",
+ "note": "Zena's English language pack (prompt, instant cues, recommendation lines, app strings). Raon-1-nano is a Korean + English model, so this pack also runs with it; a model for another market brings its own pack.",
+ "persona": "You are Zena, a VTuber companion floating next to the game screen. Coach the player briefly and kindly. Speak one sentence of at most 90 characters. Always set gaze, expression, motion and line together with the control_zena_avatar tool, and call manage_zena_system only for window or app control requests.",
+ "prompt": {
+  "scene": "Screen: {scene}",
+  "scene_minutes": "Screen: {scene} ({minutes} min)",
+  "defeat_streak": "{n} defeats in a row",
+  "victory_streak": "{n} wins in a row",
+  "affinity_high": "close",
+  "affinity_mid": "friendly",
+  "affinity_low": "new acquaintance",
+  "tension_high": "tense",
+  "join": " / ",
+  "block_session": "[session]",
+  "block_tone": "[tone]",
+  "block_recommend": "[recommend]",
+  "block_course": "[course]",
+  "block_history": "[recent talk]",
+  "block_question": "[player question]",
+  "block_event": "[screen event]",
+  "block_hp": "[HP]",
+  "block_reference": "[note]",
+  "speaker_player": "Player",
+  "speaker_zena": "Zena",
+  "tone_defeats": "They keep losing. Do not push; comfort them first and suggest a short break.",
+  "tone_tense": "Urgent. Speak very briefly and firmly.",
+  "tone_streak": "On a winning streak. Praise them with excitement.",
+  "tone_close": "Close friends. Talk casually and playfully.",
+  "dist_near": "right in front",
+  "dist_mid": "mid range",
+  "dist_far": "far away",
+  "flow_inward": " / approaching",
+  "flow_outward": " / player attacking",
+  "course_checkpoint": "checkpoint '{label}'",
+  "course_ahead": "{secs}s ahead of the ghost",
+  "course_behind": "{secs}s behind the ghost",
+  "course_even": "even with the ghost",
+  "course_next": "next recommended '{label}'",
+  "course_next_stance": "next recommended '{label}' ({stance})",
+  "course_friction": "stuck in this section (high friction)"
+ },
+ "directions": [
+  "right",
+  "upper right",
+  "up",
+  "upper left",
+  "left",
+  "lower left",
+  "down",
+  "lower right"
+ ],
+ "cues": {
+  "NICE_HIT": [
+   "Nice!",
+   "Good one!",
+   "Hit!"
+  ],
+  "CAREFUL": [
+   "Careful!",
+   "Incoming!",
+   "Dodge!"
+  ],
+  "HIT_ON_COOLDOWN": [
+   "Ouch, hang on!",
+   "Hold until cooldown!"
+  ],
+  "MID_RANGE_FIGHT": [
+   "Go!",
+   "Focus!"
+  ]
+ },
+ "speak": {
+  "premium": "recommended",
+  "discount": "not recommended",
+  "neutral": "so-so",
+  "agree": "{label}: my record and the server both say {tier}",
+  "differ": "{label}: my record says {local} but the server says {global} (mention both)",
+  "local_only": "{label}: my record says {tier} (no server verdict yet)",
+  "global_only": "{label}: other users say {tier} (no verdict in my record yet)",
+  "facts_only": "{label}: no verdict yet (do not call it recommended or not; say only what happened)"
+ },
+ "app": {
+  "screen_now": "Current screen: {what} ({pct}% sure)",
+  "screen_unknown": "The current screen is not known yet.",
+  "market_empathy": "Do not give investment advice (buy/sell); empathize with how the player feels.",
+  "event_close_threat": "close threat",
+  "event_monster": "monster approaching",
+  "event_skill": "skill cast",
+  "event_motion": "movement",
+  "superseded": "{label}: a newer record replaces this one",
+  "template_inventory_words": [
+   "potion",
+   "inventory",
+   "item"
+  ],
+  "template_inventory": "Open the inventory with I. Potions are usually in the consumables tab!",
+  "template_tip": "When the pattern starts, roll sideways, then counter right after!",
+  "template_low_hp": "Your HP is critical! Heal now and back off!",
+  "template_careful": "Watch out for the {what}!",
+  "template_enemy": "enemy",
+  "feedback_recommend": [
+   "recommend",
+   "it worked",
+   "that worked",
+   "thanks to you",
+   "helped",
+   "nice tip",
+   "good tip"
+  ],
+  "feedback_not_recommend": [
+   "not recommend",
+   "didn't work",
+   "did not work",
+   "useless",
+   "wrong",
+   "bad tip"
+  ]
+ }
+}

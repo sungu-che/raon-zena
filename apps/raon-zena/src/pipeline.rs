@@ -16,6 +16,8 @@
 use crate::capture::FrameSource;
 use crate::lexicon::LexiconMsg;
 use crate::llm::{JobHandler, LlmJob, LlmWorker};
+use crate::course::CourseTracker;
+use crate::pd_bridge::{self, Analysis};
 use crate::watcher::{ScreenFrame, ScreenObservation};
 use nlp_nms_router::{Caught, Hit, NlpNmsRouter, RouterInput};
 use std::collections::HashMap;
@@ -89,7 +91,21 @@ pub struct PipelineConfig {
     pub history_turns: usize,
     /// Which natural-language router runs.
     pub nlp: NlpMode,
+    /// Language pack code (`zena_locale`): also picks the Stanza model of the router
+    pub language: String,
+    /// The premium-discount bridge (search, verdict lines, votes); `None` keeps Zena offline
+    pub pd: Option<PdOptions>,
 }
+
+/// premium-discount bridge settings
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct PdOptions {
+    /// The user agreed to share feedback and outcomes as premium-discount votes
+    pub share: bool,
+}
+
+/// How long a question waits for premium-discount's context before Zena answers without it (the THINK pose covers it)
+pub const ASK_CONTEXT_BUDGET: std::time::Duration = std::time::Duration::from_millis(2500);
 
 /// The natural-language router (`nlp_nms_router::router::Models`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -114,8 +130,9 @@ impl std::str::FromStr for NlpMode {
     }
 }
 
-/// The router for `mode`, with the SDS ledger of its vector space under `%LOCALAPPDATA%\RaonZena\score_dynamics`.
-fn build_router(lexicon: &Lexicon, mode: NlpMode) -> NlpNmsRouter {
+/// The router for `mode`, with the SDS ledger of its vector space under `%LOCALAPPDATA%\RaonZena\score_dynamics`, and the
+/// models it runs with (the premium-discount bridge borrows the analyzer and the embedder).
+fn build_router(lexicon: &Lexicon, mode: NlpMode, language: &str) -> (NlpNmsRouter, nlp_nms_router::router::Models) {
     use nlp_nms_router::router::Models;
     let models = match mode {
         NlpMode::V1 => Models::v1(),
@@ -123,7 +140,7 @@ fn build_router(lexicon: &Lexicon, mode: NlpMode) -> NlpNmsRouter {
         #[cfg(feature = "nlp")]
         NlpMode::Auto => {
             use nlp_nms_router::embed::TextEmbedder;
-            let m = Models::auto("korean");
+            let m = Models::auto(if language == "ko" { "korean" } else { language });
             let space = m.embedder.space().to_string();
             let dir = std::env::var_os("LOCALAPPDATA")
                 .map(std::path::PathBuf::from)
@@ -144,7 +161,8 @@ fn build_router(lexicon: &Lexicon, mode: NlpMode) -> NlpNmsRouter {
         NlpMode::Auto => Models::rules(),
     };
     eprintln!("[nlp] router: {}", models.label);
-    NlpNmsRouter::with_models(lexicon, models)
+    let _ = language;
+    (NlpNmsRouter::with_models(lexicon, models.clone()), models)
 }
 
 impl Default for PipelineConfig {
@@ -158,6 +176,8 @@ impl Default for PipelineConfig {
             proactive_silence_ms: 90_000,
             history_turns: 4,
             nlp: NlpMode::V1,
+            language: zena_locale::DEFAULT_LANGUAGE.into(),
+            pd: None,
         }
     }
 }
@@ -262,20 +282,30 @@ impl ScreenGate {
 /// Extra lines the LLM gets for a request topic.
 fn topic_context(c: &Caught, lex: &Lexicon, screen: Option<&(String, f32)>) -> Vec<String> {
     let mut out = Vec::new();
+    let l = zena_locale::current();
     if let Action::Ask { topic, .. } = &c.action {
         if topic == "screen" || topic == "market" {
             if let Some((key, score)) = screen {
                 let what = lex.vision_node(key).map(|v| v.semantic.clone()).unwrap_or_else(|| key.clone());
-                out.push(format!("지금 화면: {what} (확신도 {:.0}%)", score * 100.0));
+                out.push(zena_locale::fill(l.app("screen_now"), &[("what", &what), ("pct", &format!("{:.0}", score * 100.0))]));
             } else {
-                out.push("지금 화면은 아직 모른다.".into());
+                out.push(l.app("screen_unknown").to_string());
             }
         }
         if topic == "market" {
-            out.push("투자 조언(사라/팔아라)은 하지 말고 플레이어의 기분에 공감한다.".into());
+            out.push(l.app("market_empathy").to_string());
         }
     }
     out
+}
+
+/// The game courses (premium-discount time-trial collection): `%LOCALAPPDATA%\RaonZena\courses.json`
+fn course_store() -> std::path::PathBuf {
+    std::env::var_os("LOCALAPPDATA")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(std::env::temp_dir)
+        .join("RaonZena")
+        .join("courses.json")
 }
 
 /// How a caught dictionary domain moves the session summary.
@@ -319,13 +349,17 @@ pub fn run(mut src: Box<dyn FrameSource>, links: Links, mut lexicon: Lexicon, cf
     let geo = ScreenGeometry::new(w as u32, h as u32);
     let mut sensor = LogLumSensor::new(w, h, cfg.sensor_threshold);
     let mut tracker = RoiTracker::default();
-    let mut router = build_router(&lexicon, cfg.nlp);
+    let (mut router, models) = build_router(&lexicon, cfg.nlp, &cfg.language);
+    let analysis = Analysis { embedder: models.embedder.clone(), analyzer: models.analyzer.clone() };
+    let bridge = cfg.pd.as_ref().and_then(|o| pd_bridge::connect(analysis.clone(), o.share));
     let mut sds_flushed = 0u64;
     let mut reactions = ReactionRouter::default();
     let mut cues = CuePlayer::default();
     let mut expressions = ExpressionPlayer::default();
     let mut gate = ScreenGate::default();
     let mut session = SessionTracker::default();
+    // The game course (premium-discount time-trial): scenes are checkpoints, a victory is the finish, my best run is the ghost
+    let mut course = CourseTracker::open(&course_store());
     let mut dialogue = Dialogue::new(cfg.history_turns);
     let mut proactive = ProactiveTimer::new(cfg.proactive_silence_ms);
     let mut scene_link: Option<String> = None;
@@ -346,6 +380,10 @@ pub fn run(mut src: Box<dyn FrameSource>, links: Links, mut lexicon: Lexicon, cf
         }
     );
     loop {
+        // The app in front (not Zena's own window): the scope of premium-discount searches for questions
+        if bridge.is_some() {
+            pd_bridge::note_foreground();
+        }
         // A static screen gives no frame; everything but the sensor still runs.
         let frame = src.next_frame()?;
         if let Some(f) = &frame {
@@ -405,6 +443,8 @@ pub fn run(mut src: Box<dyn FrameSource>, links: Links, mut lexicon: Lexicon, cf
                             .unwrap_or_else(|| o.key.clone());
                         session.scene(&o.key, &what, now);
                         scene_link = Some(o.link.clone());
+                        course.scene(pd_bridge::foreground_cc().as_deref(), &o.key, &what, now as i64);
+                        session.set_course(course.brief());
                     }
                     VisionKind::Privacy => quiet_until = now + o.cooldown_s as u64 * 1000,
                     VisionKind::Event => {}
@@ -414,8 +454,19 @@ pub fn run(mut src: Box<dyn FrameSource>, links: Links, mut lexicon: Lexicon, cf
                 }
                 if o.kind == VisionKind::Event {
                     match o.key.as_str() {
-                        "vision.game_defeat" => session.defeat(now),
-                        "vision.game_victory" => session.victory(now),
+                        "vision.game_defeat" => {
+                            session.defeat(now);
+                            course.defeat();
+                            session.set_course(course.brief());
+                        }
+                        "vision.game_victory" => {
+                            session.victory(now);
+                            pd_bridge::outcome_in_background(bridge.as_ref(), 1, now as i64);
+                            if let Some(added) = course.victory(now as i64) {
+                                eprintln!("[course] run recorded: {added:?}");
+                            }
+                            session.set_course(course.brief());
+                        }
                         _ => {}
                     }
                 }
@@ -452,23 +503,28 @@ pub fn run(mut src: Box<dyn FrameSource>, links: Links, mut lexicon: Lexicon, cf
         };
         let max_energy = tracks.iter().map(|t| t.roi.energy).fold(1.0f32, f32::max);
 
-        let mut inputs: Vec<RouterInput> = utterances
-            .try_iter()
-            .map(|text| RouterInput::Utterance { text, t_ms: now })
-            .collect();
+        let mut inputs: Vec<RouterInput> = Vec::new();
+        for text in utterances.try_iter() {
+            // The topic keys of this turn (Relay Keys) restore the subject a follow-up question leaves out
+            session.push_turn_keys(analysis.keys(&text));
+            if let Some((intent, negated)) = pd_bridge::detect_feedback(&text, &analysis) {
+                pd_bridge::feedback_in_background(bridge.as_ref(), intent, negated, &text, now as i64);
+            }
+            inputs.push(RouterInput::Utterance { text, t_ms: now });
+        }
         if !inputs.is_empty() {
             proactive.touch(now);
             session.affinity(0.01);
         }
         for t in tracks.iter().filter(|t| t.age >= 1) {
-            let label = match (t.flow, t.roi.polar.r) {
-                (FlowDirection::Inward, r) if r < 0.22 => "근접 위협",
-                (FlowDirection::Inward, _) => "몬스터 접근",
-                (FlowDirection::Outward, _) => "스킬 시전",
-                _ => "움직임",
+            let key = match (t.flow, t.roi.polar.r) {
+                (FlowDirection::Inward, r) if r < 0.22 => "event_close_threat",
+                (FlowDirection::Inward, _) => "event_monster",
+                (FlowDirection::Outward, _) => "event_skill",
+                _ => "event_motion",
             };
             inputs.push(RouterInput::GameEvent {
-                label: label.into(),
+                label: zena_locale::current().app(key).to_string(),
                 score: t.roi.energy / max_energy,
                 polar: t.roi.polar,
                 t_ms: now,
@@ -496,6 +552,9 @@ pub fn run(mut src: Box<dyn FrameSource>, links: Links, mut lexicon: Lexicon, cf
         }
         for c in &routed.expressions {
             session_signal(&mut session, &c.key, now);
+            if c.key == "emotion.celebrate" {
+                pd_bridge::outcome_in_background(bridge.as_ref(), 1, now as i64);
+            }
         }
         // Dictionary expressions first, then the commands (quitting plays the overlay's own farewell sequence).
         if let Some(c) = routed.expressions.iter().find(|c| {
@@ -596,10 +655,24 @@ pub fn run(mut src: Box<dyn FrameSource>, links: Links, mut lexicon: Lexicon, cf
                     );
                     // Generation runs on the LLM thread (loading the model first if it is not resident); if it is
                     // busy, fall back to an immediate cached cue so Zena still reacts.
+                    // A question: premium-discount's records and verdicts for it, fetched on the LLM thread within a
+                    // budget (the acknowledging THINK pose is already playing)
+                    let prepare = match (&bridge, &query) {
+                        (Some(b), Some(q)) => Some(pd_bridge::ask_step(
+                            b.clone(),
+                            pd_bridge::foreground_cc(),
+                            session.active_keys(),
+                            q.utterance.clone(),
+                            now as i64,
+                            ASK_CONTEXT_BUDGET,
+                        )),
+                        _ => None,
+                    };
                     if !llm.try_submit(LlmJob {
                         prompt,
                         situation: sit,
                         level: d.level,
+                        prepare,
                     }) {
                         out.send(
                             cached_cue(&mut cues, d.reason, obs.polar, ReactionLevel::Lv2Cached),
@@ -767,6 +840,7 @@ mod tests {
             prompt: String::new(),
             situation: sit.clone(),
             level: ReactionLevel::Lv3Coaching,
+            prepare: None,
         };
         while !w.try_submit(job()) {
             std::thread::sleep(Duration::from_millis(5));

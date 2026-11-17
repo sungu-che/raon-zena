@@ -39,27 +39,29 @@ pub fn stance(local: Option<Tier>, global: Option<Tier>) -> Stance {
     }
 }
 
-/// 추천 / 비추천 / 보통 (판정 전은 말하지 않으므로 빈 문자열)
-pub fn word(t: Tier) -> &'static str {
+/// 추천 / 비추천 / 보통 (판정 전은 말하지 않으므로 빈 문자열). 현재 언어팩(`zena_locale`)의 말
+pub fn word(t: Tier) -> String {
+    let l = zena_locale::current();
     match t {
-        Tier::Premium => "추천",
-        Tier::Discount => "비추천",
-        Tier::Neutral => "보통",
-        Tier::Unrated => "",
+        Tier::Premium => l.speak("premium").to_string(),
+        Tier::Discount => l.speak("discount").to_string(),
+        Tier::Neutral => l.speak("neutral").to_string(),
+        Tier::Unrated => String::new(),
     }
 }
 
 impl Stance {
-    /// One context line for the model (Korean, as the rest of Zena's prompt), about the record `label`.
+    /// One context line for the model about the record `label`, in the current language pack (`zena_locale`;
+    /// Korean by default, as the rest of Zena's prompt).
     pub fn line(self, label: &str) -> String {
+        let l = zena_locale::current();
+        let fill = zena_locale::fill;
         match self {
-            Stance::Agree(t) => format!("{label}: 내 기록과 서버 평가 모두 {}", word(t)),
-            Stance::Differ { local, global } => {
-                format!("{label}: 내 기록에선 {}인데 서버에선 {} (둘 다 말할 것)", word(local), word(global))
-            }
-            Stance::LocalOnly(t) => format!("{label}: 내 기록으로는 {} (서버 판정 전)", word(t)),
-            Stance::GlobalOnly(t) => format!("{label}: 다른 사용자들은 {} (내 기록은 판정 전)", word(t)),
-            Stance::FactsOnly => format!("{label}: 판정 전 (추천·비추천이라고 말하지 말고 있었던 일만)"),
+            Stance::Agree(t) => fill(l.speak("agree"), &[("label", label), ("tier", &word(t))]),
+            Stance::Differ { local, global } => fill(l.speak("differ"), &[("label", label), ("local", &word(local)), ("global", &word(global))]),
+            Stance::LocalOnly(t) => fill(l.speak("local_only"), &[("label", label), ("tier", &word(t))]),
+            Stance::GlobalOnly(t) => fill(l.speak("global_only"), &[("label", label), ("tier", &word(t))]),
+            Stance::FactsOnly => fill(l.speak("facts_only"), &[("label", label)]),
         }
     }
 

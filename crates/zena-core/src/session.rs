@@ -2,7 +2,12 @@
 //! how close Zena and the player are, how tense the moment is — summarised into [`SessionContext`] for Lv3
 //! prompts — and when Zena should speak up on her own ([`ProactiveTimer`]).
 
-use crate::prompt::SessionContext;
+use std::collections::VecDeque;
+
+use crate::prompt::{CourseBrief, SessionContext};
+
+/// How many recent turns keep their topic keys (Relay Keys) active: the same window as the dialogue history
+pub const ACTIVE_KEY_TURNS: usize = 4;
 
 /// Collects session signals; everything decays or resets on its own, nothing is stored.
 #[derive(Debug, Clone)]
@@ -15,6 +20,11 @@ pub struct SessionTracker {
     tension_ms: u64,
     /// Tension halves every this many ms.
     pub tension_half_life_ms: u64,
+    /// Topic keys (premium-discount-relay Relay Keys) of the last few turns, newest last. A turn with no key
+    /// still takes a slot, so a topic fades after [`ACTIVE_KEY_TURNS`] turns without it
+    turn_keys: VecDeque<Vec<String>>,
+    /// The current course and checkpoint (premium-discount time-trial), set by the app
+    course: Option<CourseBrief>,
 }
 
 impl Default for SessionTracker {
@@ -27,6 +37,8 @@ impl Default for SessionTracker {
             tension: 0.0,
             tension_ms: 0,
             tension_half_life_ms: 20_000,
+            turn_keys: VecDeque::new(),
+            course: None,
         }
     }
 }
@@ -81,6 +93,36 @@ impl SessionTracker {
         self.tension = (self.tension + by).min(1.0);
     }
 
+    /// One conversation turn's topic keys (may be empty). Keeps the last [`ACTIVE_KEY_TURNS`] turns
+    pub fn push_turn_keys(&mut self, keys: Vec<String>) {
+        self.turn_keys.push_back(keys);
+        while self.turn_keys.len() > ACTIVE_KEY_TURNS {
+            self.turn_keys.pop_front();
+        }
+    }
+
+    /// The active topic keys, newest turn first, each once. They restore the subject a follow-up question leaves
+    /// out ("그럼 2페이즈는?" after a question about Malenia)
+    pub fn active_keys(&self) -> Vec<String> {
+        let mut out: Vec<String> = Vec::new();
+        for turn in self.turn_keys.iter().rev() {
+            for k in turn {
+                if !out.contains(k) {
+                    out.push(k.clone());
+                }
+            }
+        }
+        out
+    }
+
+    pub fn set_course(&mut self, course: Option<CourseBrief>) {
+        self.course = course;
+    }
+
+    pub fn course(&self) -> Option<&CourseBrief> {
+        self.course.as_ref()
+    }
+
     pub fn snapshot(&mut self, now_ms: u64) -> SessionContext {
         self.decay(now_ms);
         SessionContext {
@@ -91,6 +133,7 @@ impl SessionTracker {
             victory_streak: self.victory_streak,
             affinity: self.affinity,
             tension: self.tension,
+            course: self.course.clone(),
         }
     }
 }
@@ -164,6 +207,27 @@ impl ProactiveTimer {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn topic_keys_fade_after_four_turns_and_the_course_reaches_the_snapshot() {
+        let mut s = SessionTracker::default();
+        s.push_turn_keys(vec!["말레니아".into()]);
+        s.push_turn_keys(vec![]);
+        s.push_turn_keys(vec!["2페이즈".into(), "말레니아".into()]);
+        assert_eq!(s.active_keys(), ["2페이즈", "말레니아"], "newest turn first, once each");
+        s.push_turn_keys(vec![]);
+        s.push_turn_keys(vec![]);
+        s.push_turn_keys(vec![]);
+        assert_eq!(s.active_keys(), ["2페이즈", "말레니아"], "still within four turns");
+        s.push_turn_keys(vec![]);
+        assert!(s.active_keys().is_empty(), "four turns without the topic");
+
+        assert!(s.snapshot(0).course.is_none());
+        s.set_course(Some(CourseBrief { checkpoint_label: "보스방".into(), ..Default::default() }));
+        assert_eq!(s.snapshot(0).course.unwrap().checkpoint_label, "보스방");
+        s.set_course(None);
+        assert!(s.course().is_none());
+    }
 
     #[test]
     fn streaks_scene_clock_and_tension() {
