@@ -41,6 +41,7 @@ mod lexicon;
 mod llm;
 mod overlay;
 mod pd_bridge;
+mod pet;
 mod pipeline;
 mod renderers;
 mod snapshot;

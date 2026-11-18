@@ -444,6 +444,16 @@ impl Lexicon {
         Ok(lex)
     }
 
+    /// The dictionary's own wake words (`meta.wake_words`, e.g. another language's dictionary naming Zena differently).
+    /// Empty when the dictionary has none.
+    pub fn wake_words(&self) -> Vec<String> {
+        self.meta
+            .get("wake_words")
+            .and_then(Value::as_array)
+            .map(|a| a.iter().filter_map(Value::as_str).map(str::trim).filter(|w| !w.is_empty()).map(str::to_string).collect())
+            .unwrap_or_default()
+    }
+
     /// The dictionary shipped in the binary.
     pub fn bundled() -> Lexicon {
         Lexicon::from_json(BUNDLED_JSON).expect("the bundled lexicon is valid (checked by tests)")
@@ -494,6 +504,14 @@ impl Lexicon {
             .flatten()
             .find_map(|k| self.node(&k))
             .and_then(|n| n.action.express().map(|e| (n.key.as_str(), e)))
+    }
+
+    /// A coaching line when the course section turns high-friction: `proactive.coach`, else the scene's line
+    /// ([`Lexicon::proactive`]).
+    pub fn proactive_coach(&self, scene_link: Option<&str>) -> Option<(&str, &Express)> {
+        self.node(&format!("{PROACTIVE_GROUP}.coach"))
+            .and_then(|n| n.action.express().map(|e| (n.key.as_str(), e)))
+            .or_else(|| self.proactive(scene_link, false))
     }
 
     /// The function bank's phrases (request endings, fillers), lowercased.
@@ -698,6 +716,9 @@ mod tests {
         assert_eq!(lex.proactive(Some("react.coding"), true).unwrap().0, "proactive.stretch");
         assert_eq!(lex.proactive(Some("react.nowhere"), false).unwrap().0, "proactive.idle");
         assert_eq!(lex.proactive(None, false).unwrap().0, "proactive.idle");
+        let (k, e) = lex.proactive_coach(Some("react.combat")).unwrap();
+        assert_eq!(k, "proactive.coach");
+        assert!(!e.lines.is_empty());
         assert!(lex.text_nodes().all(|n| n.group != PROACTIVE_GROUP));
     }
 

@@ -684,9 +684,14 @@ pub fn run(mut src: Box<dyn FrameSource>, links: Links, mut lexicon: Lexicon, cf
             }
         }
 
-        // Nothing has happened for a while: Zena speaks up on her own.
-        if let Some(kind) = proactive.due(now, session.scene_ms(now), now < quiet_until) {
-            if let Some((key, e)) = lexicon.proactive(scene_link.as_deref(), kind == Proactive::Break) {
+        // Nothing has happened for a while, or the course section turned high-friction: Zena speaks up on her own.
+        let high_friction = session.course().is_some_and(|c| c.high_friction);
+        if let Some(kind) = proactive.due_with(now, session.scene_ms(now), now < quiet_until, high_friction) {
+            let picked = match kind {
+                Proactive::Coach => lexicon.proactive_coach(scene_link.as_deref()),
+                _ => lexicon.proactive(scene_link.as_deref(), kind == Proactive::Break),
+            };
+            if let Some((key, e)) = picked {
                 let (key, e) = (key.to_string(), e.clone());
                 if let Some(cmd) = expressions.play(&key, &e, None, now, 0) {
                     if let Some(line) = cmd.speech() {

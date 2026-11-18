@@ -114,6 +114,14 @@ pub struct Overlay {
     screen: ScreenGeometry,
     utterances: Sender<String>,
     pub capture_running: Arc<AtomicBool>,
+    /// 누르기 vs 끌기 (premium-discount-window 의 5 px 문턱)
+    press: crate::pet::Press,
+    /// 제자리 복귀 (Auto-Dock)
+    dock: crate::pet::Dock,
+    /// 창 안의 커서 (물리 픽셀)
+    cursor: Option<PhysicalPosition<f64>>,
+    /// 사용자가 끌어 옮기는 중 (그 사이의 Moved 는 점 아래 창을 다시 본다)
+    dragged: bool,
 }
 
 const BUBBLE_HOLD_MS: u64 = 2500;
@@ -154,6 +162,47 @@ impl Overlay {
             screen,
             utterances,
             capture_running,
+            press: crate::pet::Press::default(),
+            dock: crate::pet::Dock::default(),
+            cursor: None,
+            dragged: false,
+        }
+    }
+
+    /// 말하거나 다루는 중 (제자리로 돌아가지 않고, 불투명도도 100 %)
+    fn busy(&self) -> bool {
+        self.speaking() || self.chat.open || self.press.holding() || self.shutdown != ShutdownPhase::Running
+    }
+
+    /// 제자리: 창이 있는 모니터의 작업 영역 오른쪽 아래 (premium-discount-window dock_position)
+    fn home(&self) -> Option<premium_discount_window::Position> {
+        let w = self.window.as_ref()?;
+        #[cfg(windows)]
+        let area = self.hwnd().and_then(crate::win32::work_area);
+        #[cfg(not(windows))]
+        let area: Option<premium_discount_window::WorkArea> = None;
+        let area = area.or_else(|| {
+            let m = w.current_monitor()?;
+            let (p, s) = (m.position(), m.size());
+            Some(premium_discount_window::WorkArea { x: p.x, y: p.y, width: s.width, height: s.height })
+        })?;
+        let size = premium_discount_window::Size::new(VIEWPORT_W as u32, VIEWPORT_H as u32);
+        Some(premium_discount_window::dock_position(size, area, w.scale_factor()))
+    }
+
+    /// 지금 창 위치 (물리 픽셀)
+    fn position(&self) -> Option<premium_discount_window::Position> {
+        let p = self.window.as_ref()?.outer_position().ok()?;
+        Some(premium_discount_window::Position::new(p.x, p.y))
+    }
+
+    /// 끌어 놓은 자리 아래의 창 (캐릭터 발밑 바로 아래 점)을 질문 범위로 기억한다
+    fn note_window_below(&self) {
+        let (Some(w), Some(p)) = (&self.window, self.position()) else { return };
+        let size = w.outer_size();
+        let uri = crate::pd_bridge::note_window_at(p.x + size.width as i32 / 2, p.y + size.height as i32 + 4);
+        if let Some(uri) = uri {
+            eprintln!("[pet] dropped on {uri}");
         }
     }
 
@@ -456,7 +505,9 @@ impl Overlay {
             mouth_form,
             brow,
             eye_open,
-            alpha: self.state.alpha(hover) as f32 / 255.0,
+            // 제자리에서 쉬는 동안 82 % (premium-discount-window PILL_OPACITY), 고스트 모드의 커서 위 30 % 는 state.alpha 가
+            alpha: self.state.alpha(hover) as f32 / 255.0
+                * crate::pet::resting_opacity(self.home().is_some_and(|h| self.position() == Some(h)), self.busy()),
             time: t,
             width,
             height,
@@ -719,17 +770,44 @@ impl ApplicationHandler<UserEvent> for Overlay {
                     g.depth = depth_texture(&g.device, g.config.width, g.config.height);
                 }
             }
+            // 누르기 vs 끌기: 누른 채 5 논리 px 를 넘으면 OS 끌기, 그 전에 떼면 누르기(채팅 열기)
             WindowEvent::MouseInput {
                 state: ElementState::Pressed,
                 button: MouseButton::Left,
                 ..
             } => {
                 if self.state.mode == WindowLayerMode::InteractivePet {
+                    let scale = self.window.as_ref().map_or(1.0, |w| w.scale_factor());
+                    let at = self.cursor.map_or((0.0, 0.0), |c| (c.x / scale, c.y / scale));
+                    self.press.down(at);
+                }
+            }
+            WindowEvent::CursorMoved { position, .. } => {
+                self.cursor = Some(position);
+                let scale = self.window.as_ref().map_or(1.0, |w| w.scale_factor());
+                if self.press.moved((position.x / scale, position.y / scale)) == Some(premium_discount_window::PointerAction::Drag) {
+                    self.dragged = true;
                     if let Some(w) = &self.window {
                         let _ = w.drag_window();
                     }
                 }
             }
+            WindowEvent::MouseInput {
+                state: ElementState::Released,
+                button: MouseButton::Left,
+                ..
+            } => {
+                if self.press.up() == Some(premium_discount_window::PointerAction::Click) {
+                    let open = !self.chat.open;
+                    self.set_chat(open);
+                }
+            }
+            WindowEvent::CursorLeft { .. } => {
+                // OS 끌기가 시작되면 뗌은 OS 가 가져간다: 눌림을 풀어 둔다
+                let _ = self.press.up();
+                self.cursor = None;
+            }
+            WindowEvent::Moved(_) if self.dragged && !self.dock.moving() => self.note_window_below(),
             WindowEvent::KeyboardInput { event, .. } => self.on_key(&event),
             WindowEvent::Ime(Ime::Preedit(text, _)) if self.chat.open => self.chat.preedit = text,
             WindowEvent::Ime(Ime::Commit(text)) if self.chat.open => {
@@ -786,6 +864,24 @@ impl ApplicationHandler<UserEvent> for Overlay {
         }
         if self.shutdown != ShutdownPhase::Running {
             el.set_control_flow(ControlFlow::WaitUntil(Instant::now() + Duration::from_millis(16)));
+        }
+        // 제자리 복귀 (Auto-Dock): 조용해진 지 2.5초가 지나면 오른쪽 아래로 0.45초 동안
+        if let (Some(home), Some(at)) = (self.home(), self.position()) {
+            let busy = self.busy();
+            if busy {
+                self.dragged = self.dragged && self.press.holding();
+            }
+            if let Some(p) = self.dock.tick(Instant::now(), at, home, busy) {
+                self.dragged = false;
+                if let Some(w) = &self.window {
+                    w.set_outer_position(PhysicalPosition::new(p.x, p.y));
+                }
+                el.set_control_flow(ControlFlow::WaitUntil(Instant::now() + Duration::from_millis(16)));
+            } else if let Some(t) = self.dock.wake_at().filter(|_| at != home) {
+                if !matches!(el.control_flow(), ControlFlow::WaitUntil(d) if d <= t) {
+                    el.set_control_flow(ControlFlow::WaitUntil(t));
+                }
+            }
         }
         if !animating && !self.speaking() {
             self.anim.level = ReactionLevel::Lv1Silent;

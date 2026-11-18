@@ -51,6 +51,12 @@ pub fn word(t: Tier) -> String {
 }
 
 impl Stance {
+    /// The stance between the device's verdict (`local`) and the server's (`global`): [`stance`] under the name the
+    /// master plan uses (`Stance::from_tiers(local, global).line(&label)`).
+    pub fn from_tiers(local: Option<Tier>, global: Option<Tier>) -> Stance {
+        stance(local, global)
+    }
+
     /// One context line for the model about the record `label`, in the current language pack (`zena_locale`;
     /// Korean by default, as the rest of Zena's prompt).
     pub fn line(self, label: &str) -> String {
@@ -86,6 +92,7 @@ mod tests {
     #[test]
     fn the_five_rows_of_the_table() {
         use Tier::*;
+        assert_eq!(Stance::from_tiers(Some(Premium), Some(Discount)), stance(Some(Premium), Some(Discount)));
         assert_eq!(stance(Some(Premium), Some(Premium)), Stance::Agree(Premium));
         assert_eq!(
             stance(Some(Premium), Some(Discount)),

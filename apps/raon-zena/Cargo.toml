@@ -20,6 +20,8 @@ zena-locale = { path = "../../crates/zena-locale" }
 zena-verdict = { path = "../../crates/zena-verdict" }
 premium-discount-mcp.workspace = true
 premium-discount-relay.workspace = true
+# cc 정규화 (normalize_cc): 앞 창 · 점 아래 창의 앱 URI 를 premium-discount 와 같은 cc 로
+premium-discount-schema.workspace = true
 premium-discount-nms.workspace = true
 # 게임 화면 코스 (타임트라이얼 체크포인트 · 기록실 · 고스트)
 premium-discount-nav.workspace = true
@@ -47,6 +49,10 @@ rocm = ["raon-infer/rocm", "raon-vision/rocm"]
 vulkan = ["raon-infer/vulkan", "raon-vision/vulkan"]
 metal = ["raon-infer/metal", "raon-vision/metal"]
 flash-attn = ["raon-infer/flash-attn"]
+
+[dev-dependencies]
+# 실제 premium-discount-mcp 와의 왕복 시험 (pd_bridge, --ignored)
+premium-discount-mcp-protocol.workspace = true
 
 [target.'cfg(windows)'.dependencies]
 windows = { version = "0.62", features = [

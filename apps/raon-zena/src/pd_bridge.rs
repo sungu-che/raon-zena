@@ -9,7 +9,11 @@
 //!   `pd_vote`(피드백은 `vote`, 결과는 `vote_outcome`)로 보낸다. 보내지 못한 표는 premium-discount-app 의 보관함이 들고 있다가
 //!   [`premium_discount_mcp::SyncLoop`] 가 다시 보낸다.
 //!
-//! 기획서와 다른 점: `Stance::from_tiers` · `feedback::extract` 는 없다(`zena_verdict::stance`, `feedback_obs` 를 쓴다).
+//! - premium-discount-mcp 가 없거나 뜨지 않거나 검색이 실패하면 패닉 없이 기기 장부만으로 답한다: 예전에 브리핑한 기록(라벨 · 원문)을
+//!   장부에 남겨 두고, 질의와 가까운 기록을 골라 내 판정(`stance(local, None)`)으로 `[추천]` 줄을 만든다. 피드백 · 결과도 장부에는
+//!   쌓이고 표만 보내지 않는다. 신구 대체는 공유에 동의했을 때 `pd_supersede` 로 서버에 알린다(서버는 작성자의 보고만 받는다).
+//!
+//! 기획서와 다른 점: `feedback::extract` 는 없다(`feedback_obs` 를 쓴다).
 //! 피드백 한 마디를 기록 k 개에 나누는 1×k 행렬에 기획서의 이중 센터링 + 1:1 배정을 쓰면, 센터링은 `v − 평균` 이 되고
 //! (관측 하나인 열은 전체 평균을 쓴다) 1:1 배정의 차이는 같은 기록을 두고 다투는 다른 행(피드백)과의 차이라서, 행이 하나면
 //! 1위 기록과 2위 기록이 아무리 가까워도 1위를 고른다. 그래서 기록 사이의 차이를 직접 본다: 코사인 1위가 2위보다
@@ -36,6 +40,10 @@ pub const MAX_VERDICT_LINES: usize = 3;
 pub const CREDIT_MARGIN: f32 = 0.03;
 const LABEL_CHARS: usize = 32;
 const SEARCH_TOP_K: u32 = 5;
+/// 오프라인 질문: 장부에 남긴 기록 중 질의와 코사인이 이 이상인 것만
+pub const LOCAL_MIN_COS: f32 = 0.3;
+/// 장부에 남기는 기록 수 (오래된 것부터 버린다)
+pub const LOCAL_RECORDS_MAX: usize = 500;
 /// 판정 트랙 (PD-Verdict v1 의 대화 트랙)
 pub const TRACK: &str = "chat";
 
@@ -43,6 +51,8 @@ pub const TRACK: &str = "chat";
 pub trait PdTools: Send {
     fn search_merged(&mut self, args: Value) -> Result<Value>;
     fn vote(&mut self, id: &str, value: i32, kind: &str) -> Result<Value>;
+    /// 신구 대체 보고 (`pd_supersede`). 서버는 두 기록 중 하나의 작성자일 때만 받는다
+    fn supersede(&mut self, old: &str, new: &str) -> Result<Value>;
 }
 
 impl PdTools for premium_discount_mcp::PdSyncClient {
@@ -51,6 +61,9 @@ impl PdTools for premium_discount_mcp::PdSyncClient {
     }
     fn vote(&mut self, id: &str, value: i32, kind: &str) -> Result<Value> {
         self.call("pd_vote", json!({"id": id, "value": value, "kind": kind}))
+    }
+    fn supersede(&mut self, old: &str, new: &str) -> Result<Value> {
+        self.call("pd_supersede", json!({"old": old, "new": new}))
     }
 }
 
@@ -121,6 +134,9 @@ pub fn uuid7_ms(id: &str) -> Option<i64> {
 pub struct LocalLedger {
     pub obs: BTreeMap<String, Vec<Obs>>,
     pub superseded: BTreeSet<String>,
+    /// 브리핑한 기록의 라벨 · 원문 (오프라인 질문의 후보)
+    #[serde(default)]
+    pub records: BTreeMap<String, CachedRecord>,
     #[serde(skip)]
     pub path: Option<PathBuf>,
 }
@@ -172,6 +188,36 @@ impl LocalLedger {
     }
 }
 
+/// 장부에 남긴 기록 하나
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct CachedRecord {
+    pub label: String,
+    pub text: String,
+    /// 기록을 쓴 시각 (UUIDv7, 모르면 브리핑한 시각)
+    pub at_ms: i64,
+    /// 마지막으로 브리핑한 시각 (오래된 것부터 버림)
+    pub seen_ms: i64,
+}
+
+impl LocalLedger {
+    /// 브리핑한 기록을 남긴다 ([`LOCAL_RECORDS_MAX`] 개까지)
+    pub fn remember(&mut self, id: &str, label: &str, text: &str, at_ms: i64, now_ms: i64) {
+        if text.trim().is_empty() && label.trim().is_empty() {
+            return;
+        }
+        self.records.insert(id.to_string(), CachedRecord { label: label.into(), text: text.into(), at_ms, seen_ms: now_ms });
+        while self.records.len() > LOCAL_RECORDS_MAX {
+            let oldest = self.records.iter().min_by_key(|(_, r)| r.seen_ms).map(|(k, _)| k.clone());
+            match oldest {
+                Some(k) => {
+                    self.records.remove(&k);
+                }
+                None => break,
+            }
+        }
+    }
+}
+
 /// 브리핑한 기록 (크레딧 후보)
 #[derive(Debug, Clone, PartialEq)]
 pub struct Briefed {
@@ -194,6 +240,8 @@ pub struct AskContext {
     pub records: Vec<String>,
     /// 신구 대체로 내린 옛 기록 id
     pub superseded: Vec<String>,
+    /// premium-discount 없이 기기 장부만으로 만든 맥락
+    pub local_only: bool,
 }
 
 /// 피드백 · 결과 하나를 나눈 결과
@@ -285,7 +333,8 @@ fn hits_of(v: &Value) -> Vec<Hit> {
 }
 
 pub struct PdBridge<T: PdTools> {
-    pub tools: Arc<std::sync::Mutex<T>>,
+    /// premium-discount-mcp 클라이언트. None 이면 기기 장부만으로 답한다
+    pub tools: Option<Arc<std::sync::Mutex<T>>>,
     pub analysis: Analysis,
     pub relay: RelayConfig,
     pub ledger: LocalLedger,
@@ -298,10 +347,46 @@ pub struct PdBridge<T: PdTools> {
 
 impl<T: PdTools> PdBridge<T> {
     pub fn new(tools: Arc<std::sync::Mutex<T>>, analysis: Analysis, ledger: LocalLedger, share: bool) -> PdBridge<T> {
-        PdBridge { tools, analysis, relay: RelayConfig::default(), ledger, share, briefed: VecDeque::new(), on_vote: None }
+        PdBridge { tools: Some(tools), analysis, relay: RelayConfig::default(), ledger, share, briefed: VecDeque::new(), on_vote: None }
+    }
+
+    /// premium-discount 없이: 기기 장부만으로 답하는 다리
+    pub fn local(analysis: Analysis, ledger: LocalLedger) -> PdBridge<T> {
+        PdBridge { tools: None, analysis, relay: RelayConfig::default(), ledger, share: false, briefed: VecDeque::new(), on_vote: None }
+    }
+
+    /// 장부에 남긴 기록 중 질의와 가까운 것 ([`LOCAL_MIN_COS`] 이상, 가까운 순)
+    fn search_local(&self, query: &str) -> Vec<Hit> {
+        let q = self.analysis.embedder.embed(query);
+        let mut scored: Vec<(f32, Hit)> = self
+            .ledger
+            .records
+            .iter()
+            .map(|(id, r)| {
+                let t = if r.text.is_empty() { r.label.as_str() } else { r.text.as_str() };
+                let hit = Hit { id: id.clone(), text: Some(r.text.clone()).filter(|t| !t.is_empty()), global: None, my_vote: None, at_ms: Some(r.at_ms) };
+                (cosine(&q, &self.analysis.embedder.embed(t)), hit)
+            })
+            .filter(|(c, _)| *c >= LOCAL_MIN_COS)
+            .collect();
+        scored.sort_by(|a, b| b.0.total_cmp(&a.0).then_with(|| a.1.id.cmp(&b.1.id)));
+        scored.into_iter().take(SEARCH_TOP_K as usize).map(|(_, h)| h).collect()
+    }
+
+    /// 서버 검색 (생략된 주어의 대상으로 먼저, 없으면 대상 없이). 클라이언트가 없거나 실패하면 Err
+    fn search_remote(&self, full: &str, cc: Option<&str>, active_keys: &[String]) -> Result<Vec<Hit>> {
+        let mut hits = match active_keys.first() {
+            Some(k) => self.search(full, cc, Some(k))?,
+            None => Vec::new(),
+        };
+        if hits.is_empty() {
+            hits = self.search(full, cc, None)?;
+        }
+        Ok(hits)
     }
 
     fn search(&self, query: &str, cc: Option<&str>, to_key: Option<&str>) -> Result<Vec<Hit>> {
+        let tools = self.tools.as_ref().ok_or_else(|| anyhow::anyhow!("premium-discount is not connected"))?;
         let mut args = json!({"query": query, "top_k": SEARCH_TOP_K});
         if let Some(cc) = cc {
             args["cc"] = json!(cc);
@@ -309,23 +394,26 @@ impl<T: PdTools> PdBridge<T> {
         if let Some(k) = to_key {
             args["to_key"] = json!(k);
         }
-        let v = self.tools.lock().map_err(|_| anyhow::anyhow!("premium-discount client lock poisoned"))?.search_merged(args)?;
+        let v = tools.lock().map_err(|_| anyhow::anyhow!("premium-discount client lock poisoned"))?.search_merged(args)?;
         Ok(hits_of(&v))
     }
 
-    /// 질문 하나의 맥락 (모듈 설명). 검색이 실패하면 오류를 돌려주고, 부르는 쪽은 맥락 없이 답한다
+    /// 질문 하나의 맥락 (모듈 설명). premium-discount 가 없거나 검색이 실패하면 기기 장부의 기록으로 답한다
     pub fn resolve_context_for_ask(&mut self, cc: Option<&str>, active_keys: &[String], query: &str, now_ms: i64) -> Result<AskContext> {
         let full = restore_query(query, active_keys);
-        // 가장 최근 주제의 대상(to_key)으로 먼저 좁히고, 없으면 대상 없이
-        let mut hits = match active_keys.first() {
-            Some(k) => self.search(&full, cc, Some(k))?,
-            None => Vec::new(),
+        // 가장 최근 주제의 대상(to_key)으로 먼저 좁히고, 없으면 대상 없이. 서버가 없거나 실패하면 장부에서
+        let (hits, local_only) = match self.search_remote(&full, cc, active_keys) {
+            Ok(h) => (h, false),
+            Err(e) => {
+                if self.tools.is_some() {
+                    eprintln!("[pd] search failed ({e:#}); answering from the local ledger");
+                }
+                (self.search_local(&full), true)
+            }
         };
-        if hits.is_empty() {
-            hits = self.search(&full, cc, None)?;
-        }
         // 신구 대체: 원문과 시각이 있는 기록끼리, 늦은 기록이 이른 기록을 대체하는가
         let mut superseded: Vec<String> = Vec::new();
+        let mut pairs: Vec<(String, String)> = Vec::new();
         let with_text: Vec<(&Hit, Record)> = hits
             .iter()
             .filter_map(|h| Some((h, self.analysis.record(h.text.as_deref()?, h.at_ms?))))
@@ -341,7 +429,7 @@ impl<T: PdTools> PdBridge<T> {
                     }
                     if let (Relation::Supersedes { .. }, _) = relay::compare(old, new, &clusters, &self.analysis.embedder, &self.relay) {
                         superseded.push(old_hit.id.clone());
-                        let _ = new_hit;
+                        pairs.push((old_hit.id.clone(), new_hit.id.clone()));
                     }
                 }
             }
@@ -349,7 +437,10 @@ impl<T: PdTools> PdBridge<T> {
         for id in &superseded {
             self.ledger.mark_superseded(id);
         }
-        let mut out = AskContext { query: full, superseded: superseded.clone(), ..Default::default() };
+        if !local_only {
+            self.report_supersessions(&pairs);
+        }
+        let mut out = AskContext { query: full, superseded: superseded.clone(), local_only, ..Default::default() };
         let locale = zena_locale::current();
         for h in &hits {
             let label = label_of(h.text.as_deref(), &h.id);
@@ -370,14 +461,31 @@ impl<T: PdTools> PdBridge<T> {
                     _ => None,
                 }
             };
-            out.verdicts.push(zena_verdict::stance(local, h.global).line(&label));
+            out.verdicts.push(zena_verdict::Stance::from_tiers(local, h.global).line(&label));
             out.records.push(h.id.clone());
-            self.briefed.push_back(Briefed { id: h.id.clone(), label, text: h.text.clone().unwrap_or_default(), at_ms: now_ms });
+            let text = h.text.clone().unwrap_or_default();
+            self.ledger.remember(&h.id, &label, &text, h.at_ms.unwrap_or(now_ms), now_ms);
+            self.briefed.push_back(Briefed { id: h.id.clone(), label, text, at_ms: now_ms });
         }
-        if !superseded.is_empty() {
+        if !superseded.is_empty() || !out.records.is_empty() {
             self.ledger.save();
         }
         Ok(out)
+    }
+
+    /// 신구 대체를 서버에 알린다 (공유에 동의했을 때만). 서버가 받지 않는 보고(작성자가 아님 등)는 기록만 남긴다
+    fn report_supersessions(&mut self, pairs: &[(String, String)]) {
+        if !self.share || pairs.is_empty() {
+            return;
+        }
+        let Some(tools) = &self.tools else { return };
+        if let Ok(mut t) = tools.lock() {
+            for (old, new) in pairs {
+                if let Err(e) = t.supersede(old, new) {
+                    eprintln!("[pd] supersede {old} -> {new}: {e:#}");
+                }
+            }
+        }
     }
 
     fn recent(&mut self, now_ms: i64) -> Vec<Briefed> {
@@ -396,7 +504,8 @@ impl<T: PdTools> PdBridge<T> {
             return 0;
         }
         let mut sent = 0;
-        if let Ok(mut t) = self.tools.lock() {
+        let Some(tools) = &self.tools else { return 0 };
+        if let Ok(mut t) = tools.lock() {
             for (id, value, kind) in votes {
                 match t.vote(id, *value, kind) {
                     Ok(_) => sent += 1,
@@ -472,22 +581,24 @@ impl<T: PdTools> PdBridge<T> {
 pub type SharedBridge = Arc<std::sync::Mutex<PdBridge<premium_discount_mcp::PdSyncClient>>>;
 
 /// 실제 다리: premium-discount-mcp 를 찾아 띄우고(그 서버가 premium-discount-app 을 띄운다), 동기화 루프를 붙이고, 기기 장부를
-/// `%LOCALAPPDATA%\RaonZena\premium-discount\zena_ledger.json` 에서 연다. 서버가 없거나 뜨지 않으면 None: 제나는 맥락 없이 답한다
+/// `%LOCALAPPDATA%\RaonZena\premium-discount\zena_ledger.json` 에서 연다. 서버가 없거나 뜨지 않으면 기기 장부만 쓰는 다리
+/// ([`PdBridge::local`]): 제나는 장부에 남은 기록과 내 판정으로 답하고, 피드백 · 결과도 장부에 쌓는다
 pub fn connect(analysis: Analysis, share: bool) -> Option<SharedBridge> {
+    let ledger = LocalLedger::open(&premium_discount_mcp::default_home().join("zena_ledger.json"));
+    let local = |analysis, ledger| Some(Arc::new(std::sync::Mutex::new(PdBridge::local(analysis, ledger))));
     let Some(server) = premium_discount_mcp::find_mcp_server() else {
-        eprintln!("[pd] premium-discount-mcp not found ($PD_MCP, next to raon-zena, install folders); answering without premium-discount");
-        return None;
+        eprintln!("[pd] premium-discount-mcp not found ($PD_MCP, next to raon-zena, install folders); answering from the local ledger");
+        return local(analysis, ledger);
     };
     let client = match premium_discount_mcp::PdSyncClient::spawn(&server, &[]) {
         Ok(c) => c,
         Err(e) => {
-            eprintln!("[pd] {}: {e:#}; answering without premium-discount", server.display());
-            return None;
+            eprintln!("[pd] {}: {e:#}; answering from the local ledger", server.display());
+            return local(analysis, ledger);
         }
     };
     let tools = Arc::new(std::sync::Mutex::new(client));
     let sync = Arc::new(premium_discount_mcp::SyncLoop::start(tools.clone(), premium_discount_mcp::SYNC_INTERVAL, None));
-    let ledger = LocalLedger::open(&premium_discount_mcp::default_home().join("zena_ledger.json"));
     let mut bridge = PdBridge::new(tools, analysis, ledger, share);
     bridge.on_vote = Some(Box::new(move || sync.request(true)));
     eprintln!("[pd] premium-discount bridge: {} (share votes: {share})", server.display());
@@ -566,10 +677,27 @@ pub fn note_foreground() {
     }
 }
 
-/// 질문 검색의 범위(`cc`): 마지막으로 앞에 있던 다른 앱 (`app://eldenring.exe`). 채팅 창에 쓰는 동안은 제나가 앞이므로 그 전의 앱
+/// 점 아래 창(제나 자신은 빼고)의 앱을 기억한다: 캐릭터를 다른 창 위로 끌어 놓으면 그 앱이 질문 범위가 된다(다음에 앞 창이
+/// 바뀌기 전까지). 기억한 앱 URI 를 돌려준다
+pub fn note_window_at(x: i32, y: i32) -> Option<String> {
+    let uri = premium_discount_window::exclude_self(premium_discount_window::window_at(x, y)).and_then(|w| w.app_uri())?;
+    if let Ok(mut l) = last_app().lock() {
+        *l = Some(uri.clone());
+    }
+    Some(uri)
+}
+
+/// premium-discount 와 같은 cc (`premium_discount_schema::envelope::normalize_cc`): `app://EldenRing.exe/보스방` → `eldenring.exe`,
+/// 웹 주소는 호스트. 정규화할 수 없으면 None
+pub fn normalized_cc(raw: &str) -> Option<String> {
+    premium_discount_schema::envelope::normalize_cc(raw).ok().map(|c| c.cc)
+}
+
+/// 질문 검색 · 코스의 범위(`cc`): 마지막으로 앞에 있던(또는 캐릭터를 끌어 놓은) 다른 앱을 정규화한 것 (`eldenring.exe`).
+/// 채팅 창에 쓰는 동안은 제나가 앞이므로 그 전의 앱
 pub fn foreground_cc() -> Option<String> {
     note_foreground();
-    last_app().lock().ok().and_then(|l| l.clone())
+    last_app().lock().ok().and_then(|l| l.clone()).and_then(|uri| normalized_cc(&uri))
 }
 
 /// 사용자의 말에서 피드백 의도를 찾는다: 언어팩의 `app.feedback_recommend` · `app.feedback_not_recommend` 글이 들어 있으면
@@ -604,12 +732,18 @@ mod tests {
     struct FakePd {
         searches: Vec<Value>,
         votes: Vec<(String, i32, String)>,
+        supersedes: Vec<(String, String)>,
         reply: Value,
+        /// 검색이 실패한다 (premium-discount-app 이 없음)
+        down: bool,
     }
 
     impl PdTools for FakePd {
         fn search_merged(&mut self, args: Value) -> Result<Value> {
             self.searches.push(args.clone());
+            if self.down {
+                anyhow::bail!("unavailable: premium-discount-app is not running");
+            }
             // 대상(to_key)으로 좁힌 검색은 비어 있다고 한다
             if args.get("to_key").is_some() {
                 return Ok(json!({"matches": []}));
@@ -619,6 +753,10 @@ mod tests {
         fn vote(&mut self, id: &str, value: i32, kind: &str) -> Result<Value> {
             self.votes.push((id.to_string(), value, kind.to_string()));
             Ok(json!({"status": "sent"}))
+        }
+        fn supersede(&mut self, old: &str, new: &str) -> Result<Value> {
+            self.supersedes.push((old.to_string(), new.to_string()));
+            Ok(json!({"old": old, "new": new}))
         }
     }
 
@@ -634,6 +772,87 @@ mod tests {
     const ID_OLD: &str = "0190f0a0-0000-7000-8000-000000000001";
     const ID_NEW: &str = "0191f0a0-0000-7000-8000-000000000002";
     const ID_SERVER: &str = "0192f0a0-0000-7000-8000-000000000003";
+
+    /// 장부에 남은 기록 둘 (예전에 브리핑한 것)과 그 판정
+    fn remembered_ledger() -> LocalLedger {
+        let mut l = LocalLedger::default();
+        l.remember(ID_OLD, "말레니아 공략", "말레니아 물 새 공격은 왼쪽으로 구르면 피한다", 1, 10);
+        l.remember(ID_SERVER, "인벤토리", "물약은 두 번째 가방에 있다", 2, 10);
+        let params = Params::v1();
+        for i in 0..6 {
+            l.add(ID_OLD, feedback_obs(FeedbackIntent::Recommend, false, 1.0, 100 + i, &params));
+            l.add(ID_SERVER, feedback_obs(FeedbackIntent::NotRecommend, false, 1.0, 100 + i, &params));
+        }
+        // 판정의 기준선이 될 또래 (원문 없는 기록 10개, 칭찬과 혹평이 섞임): 검색에는 나오지 않는다
+        for r in 0..10 {
+            for k in 0..6 {
+                let intent = if (r + k) % 2 == 0 { FeedbackIntent::Recommend } else { FeedbackIntent::NotRecommend };
+                l.add(&format!("peer{r}"), feedback_obs(intent, false, 1.0, 100 + k as i64, &params));
+            }
+        }
+        l
+    }
+
+    #[test]
+    fn without_premium_discount_the_ledger_answers_and_keeps_feedback() {
+        let mut b: PdBridge<FakePd> = PdBridge::local(analysis(), remembered_ledger());
+        let ctx = b.resolve_context_for_ask(Some("eldenring.exe"), &[], "말레니아 물 새 공격 어떻게 피해?", 1_000).unwrap();
+        assert!(ctx.local_only);
+        assert_eq!(ctx.records.first().map(String::as_str), Some(ID_OLD), "{ctx:?}");
+        // 줄 이름은 원문에서 (서버 결과와 같은 규칙), 판정은 기기 장부의 것만
+        assert_eq!(ctx.verdicts[0], "말레니아 물 새 공격은 왼쪽으로 구르면 피한다: 내 기록으로는 추천 (서버 판정 전)", "{ctx:?}");
+        assert!(!ctx.records.contains(&ID_SERVER.to_string()) || ctx.verdicts.len() > 1);
+        // 피드백은 장부에 쌓이고 표는 보내지 않는다 (보낼 곳이 없다)
+        let c = b.record_feedback(FeedbackIntent::Recommend, false, "덕분에 피했다", 2_000).unwrap();
+        assert_eq!(c.votes_sent, 0);
+        assert_eq!(b.ledger.obs[ID_OLD].len(), 7);
+        // 아무 기록도 남지 않았으면 맥락 없이 (패닉하지 않는다)
+        let mut empty: PdBridge<FakePd> = PdBridge::local(analysis(), LocalLedger::default());
+        let none = empty.resolve_context_for_ask(None, &[], "아무거나", 1).unwrap();
+        assert!(none.verdicts.is_empty() && none.local_only);
+    }
+
+    #[test]
+    fn a_failing_search_falls_back_to_the_ledger_and_remembers_what_it_briefed() {
+        let reply = json!({"matches": [{"id": ID_NEW, "text": "말레니아 2페이즈는 물 새 공격을 왼쪽으로 피한다", "verdict": {"tier": "premium"}}]});
+        let mut b = bridge(reply, true);
+        let ok = b.resolve_context_for_ask(None, &[], "말레니아 2페이즈", 1_000).unwrap();
+        assert!(!ok.local_only);
+        assert!(b.ledger.records.contains_key(ID_NEW), "briefed records are remembered for offline answers");
+        b.tools.as_ref().unwrap().lock().unwrap().down = true;
+        let off = b.resolve_context_for_ask(None, &[], "말레니아 2페이즈 물 새", 2_000).unwrap();
+        assert!(off.local_only);
+        assert_eq!(off.records, [ID_NEW]);
+        assert!(off.verdicts[0].contains("말레니아 2페이즈"), "{off:?}");
+    }
+
+    /// 실제 premium-discount-mcp 와의 왕복 (`--ignored`, `PD_MCP=<premium-discount-mcp 실행 파일>`). premium-discount-app 이 없는
+    /// 자리를 가리켜 띄우면 도구 목록은 왕복되고(pd_search_merged · pd_vote · pd_supersede), 앱이 필요한 검색은 unavailable 이라
+    /// 다리는 기기 장부로 답한다
+    #[test]
+    #[ignore = "PD_MCP=<premium-discount-mcp>"]
+    fn a_real_mcp_server_round_trip_falls_back_to_the_ledger_without_the_app() {
+        let server = std::path::PathBuf::from(std::env::var("PD_MCP").expect("PD_MCP"));
+        std::env::set_var("PD_APP", std::env::temp_dir().join("no-such-dir").join("premium-discount-app.exe"));
+        let mut mcp = premium_discount_mcp_protocol::McpClient::spawn(&server, &[]).expect("spawn premium-discount-mcp");
+        let tools = mcp.list_tools().expect("tools/list");
+        for t in ["pd_search_merged", "pd_vote", "pd_supersede", "pd_verdicts"] {
+            assert!(tools.iter().any(|x| x == t), "{t} in {tools:?}");
+        }
+        let client = premium_discount_mcp::PdSyncClient::from_client(mcp);
+        let mut b = PdBridge::new(Arc::new(std::sync::Mutex::new(client)), analysis(), remembered_ledger(), false);
+        let ctx = b.resolve_context_for_ask(Some("eldenring.exe"), &[], "말레니아 물 새 공격 어떻게 피해?", 1_000).unwrap();
+        assert!(ctx.local_only, "the search needs premium-discount-app: {ctx:?}");
+        assert_eq!(ctx.records.first().map(String::as_str), Some(ID_OLD));
+    }
+
+    #[test]
+    fn app_uris_become_premium_discount_cc() {
+        assert_eq!(normalized_cc("app://EldenRing.exe").as_deref(), Some("eldenring.exe"));
+        assert_eq!(normalized_cc("app://eldenring.exe/보스방").as_deref(), Some("eldenring.exe"), "the scene is not part of cc");
+        assert_eq!(normalized_cc("https://Store.SteamPowered.com/app/1245620").as_deref(), Some("store.steampowered.com"));
+        assert_eq!(normalized_cc("  "), None);
+    }
 
     #[test]
     fn uuid7_time_and_query_restoring() {
@@ -662,7 +881,7 @@ mod tests {
         let mut b = bridge(reply, false);
         let ctx = b.resolve_context_for_ask(Some("eldenring.exe"), &["말레니아".into()], "그럼 물 새 공격은?", 1_000).unwrap();
         // 대상(to_key)으로 먼저 찾고, 없으면 대상 없이
-        let searches = &b.tools.lock().unwrap().searches;
+        let searches = &b.tools.as_ref().unwrap().lock().unwrap().searches;
         assert_eq!(searches.len(), 2);
         assert_eq!(searches[0]["to_key"], "말레니아");
         assert_eq!(searches[1]["query"], "말레니아 그럼 물 새 공격은?");
@@ -744,7 +963,7 @@ mod tests {
         shared.resolve_context_for_ask(None, &[], "공략", 0).unwrap();
         let s = shared.record_feedback(FeedbackIntent::NotRecommend, false, "라다곤 2페이즈 빛 기둥 별로였어", 10).unwrap();
         assert_eq!(s.votes_sent, 1);
-        assert_eq!(shared.tools.lock().unwrap().votes, [(ID_SERVER.to_string(), -1, "vote".to_string())]);
+        assert_eq!(shared.tools.as_ref().unwrap().lock().unwrap().votes, [(ID_SERVER.to_string(), -1, "vote".to_string())]);
         // 이중 부정(부정된 비추천)은 반만큼 추천 쪽
         let n = shared.record_feedback(FeedbackIntent::NotRecommend, true, "라다곤 빛 기둥 별로 아니었어", 20).unwrap();
         assert_eq!(n.credits[0].2, 1);

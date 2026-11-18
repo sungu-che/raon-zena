@@ -145,6 +145,9 @@ pub enum Proactive {
     Chatter,
     /// The same scene for a long time: suggest a break / stretching.
     Break,
+    /// The course section turned high-friction (`CourseBrief::high_friction`): a coaching line without waiting for the
+    /// full silence.
+    Coach,
 }
 
 /// Decides when Zena speaks up on her own. Activity (the player talking, Zena speaking, a reaction) resets the
@@ -155,7 +158,11 @@ pub struct ProactiveTimer {
     pub cooldown_ms: u64,
     pub break_after_ms: u64,
     pub break_every_ms: u64,
+    /// Quiet needed before a coaching line once friction spikes (much shorter than `silence_ms`).
+    pub coach_after_ms: u64,
     last_activity: u64,
+    /// A coaching line was said for the current friction spike; armed again when friction calms down.
+    coached: bool,
     last_line: Option<u64>,
     last_break: Option<u64>,
 }
@@ -174,7 +181,9 @@ impl ProactiveTimer {
             cooldown_ms: silence_ms.max(1) * 2,
             break_after_ms: 50 * 60_000,
             break_every_ms: 50 * 60_000,
+            coach_after_ms: 8_000,
             last_activity: 0,
+            coached: false,
             last_line: None,
             last_break: None,
         }
@@ -186,6 +195,21 @@ impl ProactiveTimer {
 
     /// `scene_ms`: how long the current scene has been on screen. `quiet`: Zena must not talk (private screen).
     pub fn due(&mut self, now_ms: u64, scene_ms: u64, quiet: bool) -> Option<Proactive> {
+        self.due_with(now_ms, scene_ms, quiet, false)
+    }
+
+    /// [`ProactiveTimer::due`] with the course's friction: when the section turns high-friction, Zena coaches once after
+    /// `coach_after_ms` of quiet instead of the full `silence_ms` (the cooldown between ordinary lines does not apply;
+    /// one coaching line per spike, armed again once friction calms down).
+    pub fn due_with(&mut self, now_ms: u64, scene_ms: u64, quiet: bool, high_friction: bool) -> Option<Proactive> {
+        if !high_friction {
+            self.coached = false;
+        } else if !self.coached && self.silence_ms != 0 && !quiet && now_ms.saturating_sub(self.last_activity) >= self.coach_after_ms {
+            self.coached = true;
+            self.last_line = Some(now_ms);
+            self.last_activity = now_ms;
+            return Some(Proactive::Coach);
+        }
         if self.silence_ms == 0 || quiet || now_ms.saturating_sub(self.last_activity) < self.silence_ms {
             return None;
         }
@@ -262,5 +286,21 @@ mod tests {
         assert_eq!(p.due(300_000, 60 * 60_000, false), Some(Proactive::Break));
         assert_eq!(p.due(500_000, 70 * 60_000, false), Some(Proactive::Chatter), "one break per period");
         assert_eq!(ProactiveTimer::new(0).due(10_000_000, 0, false), None, "disabled");
+    }
+
+    #[test]
+    fn a_friction_spike_brings_one_coaching_line_before_the_silence_is_up() {
+        let mut p = ProactiveTimer::new(90_000);
+        p.touch(100_000);
+        assert_eq!(p.due_with(105_000, 0, false, true), None, "a few seconds of quiet first");
+        assert_eq!(p.due_with(108_000, 0, false, true), Some(Proactive::Coach), "well before the 90 s silence");
+        assert_eq!(p.due_with(120_000, 0, false, true), None, "once per spike");
+        assert_eq!(p.due_with(130_000, 0, false, false), None, "calm again");
+        assert_eq!(p.due_with(140_000, 0, false, true), Some(Proactive::Coach), "a new spike");
+        assert_eq!(p.due_with(400_000, 0, true, true), None, "a private screen keeps Zena quiet");
+        assert_eq!(ProactiveTimer::new(0).due_with(1_000_000, 0, false, true), None, "disabled");
+        // without friction it is the ordinary timer
+        let mut q = ProactiveTimer::new(60_000);
+        assert_eq!(q.due_with(61_000, 0, false, false), Some(Proactive::Chatter));
     }
 }

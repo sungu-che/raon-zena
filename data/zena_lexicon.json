@@ -327,6 +327,10 @@
       "semantic": "The player has been working on a document.",
       "express": { "emotion": "FOCUSED", "motion": "NOD", "lines": ["잘하고 있어. 물 한 잔 어때?"] }
     },
+    "coach": {
+      "semantic": "Said on her own when the course section turns high-friction (the player keeps failing here): a short coaching line before the full silence.",
+      "express": { "emotion": "FOCUSED", "motion": "LEAN_FORWARD_POINT", "emote": "SPARKLE_IDEA", "lines": ["여기 좀 막히지? 패턴 한 번 같이 보자!", "천천히! 첫 공격만 피하면 길이 보여.", "숨 한 번 고르고 다시 가 보자. 할 수 있어!"] }
+    },
     "stretch": {
       "semantic": "The same screen for a long session: suggest a break.",
       "express": { "emotion": "RELIEVED", "motion": "NOD", "emote": "RELIEF_SIGH", "lines": ["벌써 한참 했어! 같이 스트레칭 하자~", "눈 좀 쉬어 주자. 먼 곳 한 번 보기!"] }

@@ -9,6 +9,26 @@ use windows::Win32::UI::Input::KeyboardAndMouse::{RegisterHotKey, MOD_CONTROL, M
 use windows::Win32::UI::WindowsAndMessaging::*;
 use zena_core::window::{Hotkey, WindowState};
 
+/// 창이 있는 모니터의 작업 영역 (작업 표시줄을 뺀 곳, 물리 픽셀). 제자리 복귀의 목적지 계산에 쓴다
+pub fn work_area(hwnd: HWND) -> Option<premium_discount_window::WorkArea> {
+    use windows::Win32::Graphics::Gdi::{GetMonitorInfoW, MonitorFromWindow, MONITORINFO, MONITOR_DEFAULTTONEAREST};
+    // SAFETY: 창 핸들을 넘기고, 크기를 채운 MONITORINFO 하나를 받는다
+    unsafe {
+        let monitor = MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST);
+        let mut info = MONITORINFO { cbSize: std::mem::size_of::<MONITORINFO>() as u32, ..Default::default() };
+        if !GetMonitorInfoW(monitor, &mut info).as_bool() {
+            return None;
+        }
+        let r = info.rcWork;
+        Some(premium_discount_window::WorkArea {
+            x: r.left,
+            y: r.top,
+            width: (r.right - r.left).max(0) as u32,
+            height: (r.bottom - r.top).max(0) as u32,
+        })
+    }
+}
+
 pub fn hwnd_from_raw(raw: isize) -> HWND {
     HWND(raw as *mut c_void)
 }

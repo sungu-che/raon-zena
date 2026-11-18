@@ -6,13 +6,17 @@
 //!   (`Collection`, 게임마다 코스 10개)에 들어간다. 패배는 결승이 아니라 그 구간의 마찰이다.
 //! - **고스트**: 진행 중에 `Collection::guide` 로 내 최고 기록과 견준다(앞섬 · 뒤짐, 다음 체크포인트).
 //!
+//! - **체크포인트 판정 (기기)**: 이긴 런이 지난 체크포인트마다 premium 하나, 진 자리(지금 체크포인트)에 discount 하나를 쌓는다
+//!   (premium-discount-nav `CheckpointTally`, 결정 3개부터 등급). 다음 추천 체크포인트의 `local` 이 이 등급이다.
+//!
 //! 결과는 언어와 상관없는 [`CourseBrief`] 이고, 프롬프트의 `[코스]` 줄은 언어팩이 만든다. 다른 사용자의 코스(공개 고스트,
 //! `/nav/trials`)는 아직 받지 않는다: 지금 고스트는 내 기록뿐이다.
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
 
-use premium_discount_nav::{app_hash, screen_hash, Checkpoint, Collection, Run, StepKind};
+use premium_discount_nav::{app_hash, screen_hash, Checkpoint, CheckpointTally, Collection, Run, StepKind};
+use zena_verdict::Tier;
 use zena_core::prompt::{CourseBrief, NextCheckpoint};
 
 /// 한 체크포인트에서 이만큼 지면 그 구간은 막혀 있다(마찰 큼)로 본다
@@ -27,12 +31,24 @@ pub struct CourseTracker {
     labels: HashMap<String, String>,
     defeats_here: u32,
     pub collection: Collection,
+    /// 체크포인트 해시 → 기기의 판정 수 (이긴 런이 지남 premium, 거기서 짐 discount)
+    pub marks: BTreeMap<String, CheckpointTally>,
     path: Option<PathBuf>,
 }
 
 impl CourseTracker {
     pub fn new(collection: Collection, path: Option<PathBuf>) -> CourseTracker {
-        CourseTracker { cc: None, app: None, progress: Vec::new(), labels: HashMap::new(), defeats_here: 0, collection, path }
+        let marks = path
+            .as_ref()
+            .and_then(|p| std::fs::read_to_string(marks_path(p)).ok())
+            .and_then(|s| serde_json::from_str(&s).ok())
+            .unwrap_or_default();
+        CourseTracker { cc: None, app: None, progress: Vec::new(), labels: HashMap::new(), defeats_here: 0, collection, marks, path }
+    }
+
+    /// 체크포인트의 기기 판정 (결정이 3개보다 적으면 Unrated)
+    pub fn local_tier(&self, hash: &str) -> Tier {
+        self.marks.get(hash).map_or(Tier::Unrated, CheckpointTally::tier)
     }
 
     /// 기록실을 파일에서 연다 (없으면 빈 기록실)
@@ -48,6 +64,9 @@ impl CourseTracker {
             }
             if let Ok(s) = serde_json::to_string(&self.collection) {
                 let _ = std::fs::write(p, s);
+            }
+            if let Ok(s) = serde_json::to_string(&self.marks) {
+                let _ = std::fs::write(marks_path(p), s);
             }
         }
     }
@@ -74,8 +93,13 @@ impl CourseTracker {
         }
     }
 
+    /// 패배: 지금 체크포인트의 마찰과 discount 하나
     pub fn defeat(&mut self) {
         self.defeats_here += 1;
+        if let Some(last) = self.progress.last() {
+            self.marks.entry(last.hash.clone()).or_default().discount += 1;
+            self.save();
+        }
     }
 
     /// 승리: 지금까지의 체크포인트를 런으로 기록실에 넣고 새로 시작한다. 체크포인트가 둘보다 적으면 넣지 않는다
@@ -90,6 +114,10 @@ impl CourseTracker {
         }
         self.progress.clear();
         self.defeats_here = 0;
+        // 이긴 길: 지난 체크포인트마다 premium 하나
+        for c in &points {
+            self.marks.entry(c.hash.clone()).or_default().premium += 1;
+        }
         let run = Run::from_checkpoints(&app, &points, None).ok()?;
         let added = self.collection.add(&run);
         self.save();
@@ -108,7 +136,7 @@ impl CourseTracker {
             ghost_delta_ms: guide.as_ref().and_then(|g| g.vs_best),
             next_recommended: guide.as_ref().and_then(|g| g.next.as_ref()).map(|n| NextCheckpoint {
                 label: self.labels.get(&n.hash).cloned().unwrap_or_default(),
-                local: None,
+                local: Some(self.local_tier(&n.hash)).filter(|t| *t != Tier::Unrated),
                 global: guide.as_ref().map(|g| g.next_tier),
             }),
             high_friction: self.defeats_here >= FRICTION_DEFEATS,
@@ -116,9 +144,39 @@ impl CourseTracker {
     }
 }
 
+/// 체크포인트 판정을 두는 파일 (기록실 옆)
+fn marks_path(collection: &Path) -> PathBuf {
+    collection.with_file_name("course_marks.json")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn won_paths_mark_their_checkpoints_premium_and_stuck_ones_discount() {
+        let mut t = CourseTracker::new(Collection::default(), None);
+        for run in 0..3 {
+            let base = run * 1_000_000;
+            t.scene(Some(GAME), "vision.gate", "성문", base);
+            t.scene(Some(GAME), "vision.bridge", "다리", base + 20_000);
+            t.scene(Some(GAME), "vision.boss_room", "보스방", base + 40_000);
+            t.victory(base + 60_000);
+        }
+        let boss = screen_hash(GAME, "scene:vision.boss_room").unwrap();
+        assert_eq!(t.local_tier(&boss), Tier::Premium, "three won runs passed it");
+        // 넷째 판: 다리에서, 다음 추천 '보스방' 은 내 기록으로 premium
+        t.scene(Some(GAME), "vision.gate", "성문", 4_000_000);
+        t.scene(Some(GAME), "vision.bridge", "다리", 4_020_000);
+        let next = t.brief().unwrap().next_recommended.unwrap();
+        assert_eq!((next.label.as_str(), next.local), ("보스방", Some(Tier::Premium)));
+        // 늪에서 거듭 지면 그 체크포인트는 discount
+        t.scene(Some(GAME), "vision.swamp", "늪", 4_030_000);
+        for _ in 0..3 {
+            t.defeat();
+        }
+        assert_eq!(t.local_tier(&screen_hash(GAME, "scene:vision.swamp").unwrap()), Tier::Discount);
+    }
 
     const GAME: &str = "app://eldenring.exe";
 

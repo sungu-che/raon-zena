@@ -5590,7 +5590,7 @@ dependencies = [
 [[package]]
 name = "onnxruntime"
 version = "0.0.14"
-source = "git+https://github.com/Qntology/premium-discount?rev=9925011128c2af1bcf8000cabafdd208a2119c77#9925011128c2af1bcf8000cabafdd208a2119c77"
+source = "git+https://github.com/Qntology/premium-discount?rev=bb51311967b5d936a9dd6729a1e5747e9d2f3660#bb51311967b5d936a9dd6729a1e5747e9d2f3660"
 dependencies = [
  "lazy_static",
  "ndarray 0.15.6",
@@ -5602,7 +5602,7 @@ dependencies = [
 [[package]]
 name = "onnxruntime-sys"
 version = "0.0.14"
-source = "git+https://github.com/Qntology/premium-discount?rev=9925011128c2af1bcf8000cabafdd208a2119c77#9925011128c2af1bcf8000cabafdd208a2119c77"
+source = "git+https://github.com/Qntology/premium-discount?rev=bb51311967b5d936a9dd6729a1e5747e9d2f3660#bb51311967b5d936a9dd6729a1e5747e9d2f3660"
 dependencies = [
  "flate2",
  "libloading 0.8.9",
@@ -5919,12 +5919,12 @@ dependencies = [
 [[package]]
 name = "premium-discount-filter"
 version = "0.1.0"
-source = "git+https://github.com/Qntology/premium-discount?rev=9925011128c2af1bcf8000cabafdd208a2119c77#9925011128c2af1bcf8000cabafdd208a2119c77"
+source = "git+https://github.com/Qntology/premium-discount?rev=bb51311967b5d936a9dd6729a1e5747e9d2f3660#bb51311967b5d936a9dd6729a1e5747e9d2f3660"
 
 [[package]]
 name = "premium-discount-identity"
 version = "0.1.0"
-source = "git+https://github.com/Qntology/premium-discount?rev=9925011128c2af1bcf8000cabafdd208a2119c77#9925011128c2af1bcf8000cabafdd208a2119c77"
+source = "git+https://github.com/Qntology/premium-discount?rev=bb51311967b5d936a9dd6729a1e5747e9d2f3660#bb51311967b5d936a9dd6729a1e5747e9d2f3660"
 dependencies = [
  "getrandom 0.3.4",
  "hmac",
@@ -5938,7 +5938,7 @@ dependencies = [
 [[package]]
 name = "premium-discount-manifest"
 version = "0.1.0"
-source = "git+https://github.com/Qntology/premium-discount?rev=9925011128c2af1bcf8000cabafdd208a2119c77#9925011128c2af1bcf8000cabafdd208a2119c77"
+source = "git+https://github.com/Qntology/premium-discount?rev=bb51311967b5d936a9dd6729a1e5747e9d2f3660#bb51311967b5d936a9dd6729a1e5747e9d2f3660"
 dependencies = [
  "sha2 0.10.9",
 ]
@@ -5946,7 +5946,7 @@ dependencies = [
 [[package]]
 name = "premium-discount-mcp"
 version = "0.1.0"
-source = "git+https://github.com/Qntology/premium-discount?rev=9925011128c2af1bcf8000cabafdd208a2119c77#9925011128c2af1bcf8000cabafdd208a2119c77"
+source = "git+https://github.com/Qntology/premium-discount?rev=bb51311967b5d936a9dd6729a1e5747e9d2f3660#bb51311967b5d936a9dd6729a1e5747e9d2f3660"
 dependencies = [
  "anyhow",
  "premium-discount-filter",
@@ -5962,7 +5962,7 @@ dependencies = [
 [[package]]
 name = "premium-discount-mcp-protocol"
 version = "0.1.0"
-source = "git+https://github.com/Qntology/premium-discount?rev=9925011128c2af1bcf8000cabafdd208a2119c77#9925011128c2af1bcf8000cabafdd208a2119c77"
+source = "git+https://github.com/Qntology/premium-discount?rev=bb51311967b5d936a9dd6729a1e5747e9d2f3660#bb51311967b5d936a9dd6729a1e5747e9d2f3660"
 dependencies = [
  "anyhow",
  "serde_json",
@@ -5971,7 +5971,7 @@ dependencies = [
 [[package]]
 name = "premium-discount-nav"
 version = "0.1.0"
-source = "git+https://github.com/Qntology/premium-discount?rev=9925011128c2af1bcf8000cabafdd208a2119c77#9925011128c2af1bcf8000cabafdd208a2119c77"
+source = "git+https://github.com/Qntology/premium-discount?rev=bb51311967b5d936a9dd6729a1e5747e9d2f3660#bb51311967b5d936a9dd6729a1e5747e9d2f3660"
 dependencies = [
  "premium-discount-identity",
  "premium-discount-sds",
@@ -5982,7 +5982,7 @@ dependencies = [
 [[package]]
 name = "premium-discount-nlp"
 version = "0.1.0"
-source = "git+https://github.com/Qntology/premium-discount?rev=9925011128c2af1bcf8000cabafdd208a2119c77#9925011128c2af1bcf8000cabafdd208a2119c77"
+source = "git+https://github.com/Qntology/premium-discount?rev=bb51311967b5d936a9dd6729a1e5747e9d2f3660#bb51311967b5d936a9dd6729a1e5747e9d2f3660"
 dependencies = [
  "anyhow",
  "candle-core",
@@ -6001,7 +6001,7 @@ dependencies = [
 [[package]]
 name = "premium-discount-nms"
 version = "0.1.0"
-source = "git+https://github.com/Qntology/premium-discount?rev=9925011128c2af1bcf8000cabafdd208a2119c77#9925011128c2af1bcf8000cabafdd208a2119c77"
+source = "git+https://github.com/Qntology/premium-discount?rev=bb51311967b5d936a9dd6729a1e5747e9d2f3660#bb51311967b5d936a9dd6729a1e5747e9d2f3660"
 dependencies = [
  "anyhow",
  "candle-core",
@@ -6014,7 +6014,7 @@ dependencies = [
 [[package]]
 name = "premium-discount-quant"
 version = "0.1.0"
-source = "git+https://github.com/Qntology/premium-discount?rev=9925011128c2af1bcf8000cabafdd208a2119c77#9925011128c2af1bcf8000cabafdd208a2119c77"
+source = "git+https://github.com/Qntology/premium-discount?rev=bb51311967b5d936a9dd6729a1e5747e9d2f3660#bb51311967b5d936a9dd6729a1e5747e9d2f3660"
 dependencies = [
  "anyhow",
  "half",
@@ -6027,7 +6027,7 @@ dependencies = [
 [[package]]
 name = "premium-discount-relay"
 version = "0.1.0"
-source = "git+https://github.com/Qntology/premium-discount?rev=9925011128c2af1bcf8000cabafdd208a2119c77#9925011128c2af1bcf8000cabafdd208a2119c77"
+source = "git+https://github.com/Qntology/premium-discount?rev=bb51311967b5d936a9dd6729a1e5747e9d2f3660#bb51311967b5d936a9dd6729a1e5747e9d2f3660"
 dependencies = [
  "premium-discount-nms",
  "premium-discount-sds",
@@ -6036,7 +6036,7 @@ dependencies = [
 [[package]]
 name = "premium-discount-schema"
 version = "0.1.0"
-source = "git+https://github.com/Qntology/premium-discount?rev=9925011128c2af1bcf8000cabafdd208a2119c77#9925011128c2af1bcf8000cabafdd208a2119c77"
+source = "git+https://github.com/Qntology/premium-discount?rev=bb51311967b5d936a9dd6729a1e5747e9d2f3660#bb51311967b5d936a9dd6729a1e5747e9d2f3660"
 dependencies = [
  "anyhow",
  "premium-discount-identity",
@@ -6048,7 +6048,7 @@ dependencies = [
 [[package]]
 name = "premium-discount-sds"
 version = "0.1.0"
-source = "git+https://github.com/Qntology/premium-discount?rev=9925011128c2af1bcf8000cabafdd208a2119c77#9925011128c2af1bcf8000cabafdd208a2119c77"
+source = "git+https://github.com/Qntology/premium-discount?rev=bb51311967b5d936a9dd6729a1e5747e9d2f3660#bb51311967b5d936a9dd6729a1e5747e9d2f3660"
 dependencies = [
  "anyhow",
  "serde",
@@ -6058,7 +6058,7 @@ dependencies = [
 [[package]]
 name = "premium-discount-sensor"
 version = "0.1.0"
-source = "git+https://github.com/Qntology/premium-discount?rev=9925011128c2af1bcf8000cabafdd208a2119c77#9925011128c2af1bcf8000cabafdd208a2119c77"
+source = "git+https://github.com/Qntology/premium-discount?rev=bb51311967b5d936a9dd6729a1e5747e9d2f3660#bb51311967b5d936a9dd6729a1e5747e9d2f3660"
 dependencies = [
  "serde",
 ]
@@ -6066,7 +6066,7 @@ dependencies = [
 [[package]]
 name = "premium-discount-verdict"
 version = "0.1.0"
-source = "git+https://github.com/Qntology/premium-discount?rev=9925011128c2af1bcf8000cabafdd208a2119c77#9925011128c2af1bcf8000cabafdd208a2119c77"
+source = "git+https://github.com/Qntology/premium-discount?rev=bb51311967b5d936a9dd6729a1e5747e9d2f3660#bb51311967b5d936a9dd6729a1e5747e9d2f3660"
 dependencies = [
  "serde",
 ]
@@ -6074,7 +6074,7 @@ dependencies = [
 [[package]]
 name = "premium-discount-vision"
 version = "0.1.0"
-source = "git+https://github.com/Qntology/premium-discount?rev=9925011128c2af1bcf8000cabafdd208a2119c77#9925011128c2af1bcf8000cabafdd208a2119c77"
+source = "git+https://github.com/Qntology/premium-discount?rev=bb51311967b5d936a9dd6729a1e5747e9d2f3660#bb51311967b5d936a9dd6729a1e5747e9d2f3660"
 dependencies = [
  "anyhow",
  "candle-core",
@@ -6089,7 +6089,7 @@ dependencies = [
 [[package]]
 name = "premium-discount-window"
 version = "0.1.0"
-source = "git+https://github.com/Qntology/premium-discount?rev=9925011128c2af1bcf8000cabafdd208a2119c77#9925011128c2af1bcf8000cabafdd208a2119c77"
+source = "git+https://github.com/Qntology/premium-discount?rev=bb51311967b5d936a9dd6729a1e5747e9d2f3660#bb51311967b5d936a9dd6729a1e5747e9d2f3660"
 dependencies = [
  "windows-sys 0.61.2",
 ]
@@ -6504,9 +6504,11 @@ dependencies = [
  "nlp-nms-router",
  "pollster",
  "premium-discount-mcp",
+ "premium-discount-mcp-protocol",
  "premium-discount-nav",
  "premium-discount-nms",
  "premium-discount-relay",
+ "premium-discount-schema",
  "premium-discount-sensor",
  "premium-discount-window",
  "raon-infer",

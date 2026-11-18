@@ -11,12 +11,39 @@ use zena_lexicon::{Action, Lexicon};
 /// Zena's domain bank: entries carry the dictionary node's [`Action`].
 pub type DomainBank<E> = premium_discount_nms::domain::DomainBank<Action, E>;
 
-/// What an utterance may start with to address Zena; removed before matching (`Normalized::addressed`).
+/// What an utterance may start with to address Zena; removed before matching (`Normalized::addressed`). The default
+/// when neither the environment nor the dictionary names others ([`wake_words_for`]).
 pub const WAKE_WORDS: &[&str] = &["제나야", "제나", "라온 제나", "라온제나", "hey zena", "zena", "raon zena"];
 
-/// Makes Zena's [`WAKE_WORDS`] the NMS core's wake words (process-wide; the router and the banks call it).
+/// Environment override: comma-separated wake words (`ZENA_WAKE_WORDS=ゼナ,ゼナちゃん`).
+pub const WAKE_WORDS_ENV: &str = "ZENA_WAKE_WORDS";
+
+/// The wake words to use: `$ZENA_WAKE_WORDS` (comma-separated), else the dictionary's `meta.wake_words` (a language /
+/// culture pack ships its own), else [`WAKE_WORDS`].
+pub fn wake_words_for(lex: Option<&Lexicon>) -> Vec<String> {
+    let from_env: Vec<String> = std::env::var(WAKE_WORDS_ENV)
+        .ok()
+        .map(|v| v.split(',').map(str::trim).filter(|w| !w.is_empty()).map(str::to_string).collect())
+        .unwrap_or_default();
+    if !from_env.is_empty() {
+        return from_env;
+    }
+    let from_lexicon = lex.map(Lexicon::wake_words).unwrap_or_default();
+    if !from_lexicon.is_empty() {
+        return from_lexicon;
+    }
+    WAKE_WORDS.iter().map(|w| w.to_string()).collect()
+}
+
+/// Makes the wake words ([`wake_words_for`] without a dictionary) the NMS core's (process-wide; the router and the
+/// banks call it).
 pub fn install_wake_words() {
-    premium_discount_nms::normalize::set_wake_words(WAKE_WORDS);
+    premium_discount_nms::normalize::set_wake_words(&wake_words_for(None));
+}
+
+/// [`install_wake_words`] with the dictionary's own `meta.wake_words`.
+pub fn install_wake_words_for(lex: &Lexicon) {
+    premium_discount_nms::normalize::set_wake_words(&wake_words_for(Some(lex)));
 }
 
 /// The dictionary's text nodes as bank specs, and its function phrases.
@@ -44,13 +71,13 @@ pub trait LexiconBank<E: TextEmbedder>: Sized {
 
 impl<E: TextEmbedder> LexiconBank<E> for DomainBank<E> {
     fn from_lexicon(lex: &Lexicon, embedder: E) -> Self {
-        install_wake_words();
+        install_wake_words_for(lex);
         let (specs, function) = specs(lex);
         premium_discount_nms::domain::DomainBank::from_specs(specs, &function, embedder)
     }
 
     fn from_lexicon_content(lex: &Lexicon, embedder: E) -> Self {
-        install_wake_words();
+        install_wake_words_for(lex);
         let (specs, function) = specs(lex);
         premium_discount_nms::domain::DomainBank::from_specs_content(specs, &function, embedder)
     }
@@ -67,6 +94,17 @@ mod tests {
     }
 
     /// The span test that used to live in the NMS core: it needs this dictionary.
+    #[test]
+    fn wake_words_come_from_the_dictionary_or_default() {
+        assert!(std::env::var(WAKE_WORDS_ENV).is_err(), "the test expects no override in the environment");
+        let defaults = wake_words_for(None);
+        assert_eq!(defaults.len(), WAKE_WORDS.len());
+        assert!(defaults.contains(&"제나야".to_string()));
+        assert_eq!(wake_words_for(Some(&Lexicon::bundled())), defaults, "the bundled dictionary keeps the defaults");
+        let ja = Lexicon::from_json(r#"{"meta": {"wake_words": ["ゼナ", " ゼナちゃん ", ""]}}"#).unwrap();
+        assert_eq!(wake_words_for(Some(&ja)), ["ゼナ", "ゼナちゃん"]);
+    }
+
     #[test]
     fn one_utterance_two_domains() {
         let bank = bank();
