@@ -166,6 +166,37 @@ impl Linear {
             candle_core::Module::forward(&self.inner, &x)
         }
     }
+
+    /// Single-rounding fused `silu(x @ gate^T) * (x @ up^T)` for native CUDA/ROCm W8A16 decode
+    /// (`rows <= 8`, both weights `QTensor`, `exact`, imatrix disabled, verified via `AccelOp::FusedGateUpSilu`).
+    /// Returns `Ok(None)` on unsupported devices/shapes so the caller runs the standard path.
+    pub fn fused_gate_up_silu(&self, up: &Self, x: &Tensor) -> candle_core::Result<Option<Tensor>> {
+        if !self.exact
+            || !up.exact
+            || imatrix::ON.load(std::sync::atomic::Ordering::Relaxed)
+        {
+            return Ok(None);
+        }
+        let dev = x.device();
+        if !(dev.is_cuda() || crate::device::is_rocm(dev)) {
+            return Ok(None);
+        }
+        let rows = x.elem_count() / x.dim(candle_core::D::Minus1)?;
+        if rows == 0 || rows > 8 {
+            return Ok(None);
+        }
+        if !matches!((&self.inner, &up.inner), (QMatMul::QTensor(_), QMatMul::QTensor(_))) {
+            return Ok(None);
+        }
+        if !crate::device::accel_op_ok(dev, crate::device::AccelOp::FusedGateUpSilu) {
+            return Ok(None);
+        }
+        let x = x.contiguous()?;
+        match self.inner.fused_gate_up_silu(&up.inner, &x) {
+            Ok(y) => Ok(Some(y)),
+            Err(_) => Ok(None),
+        }
+    }
 }
 
 fn ggml_dtype(t: GgmlType) -> Result<GgmlDType> {

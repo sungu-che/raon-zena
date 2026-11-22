@@ -314,12 +314,22 @@ pub fn drain_gpu_pool(d: &Device) {
     }
 }
 
-/// Drains every GPU device cached by `select_device` (safe to call on idle unload or exit).
+/// Ordinal-safe VRAM `(free, total)` query directly on `d` without cross-backend context leaks.
+pub fn device_mem_info_of(d: &Device) -> Option<(usize, usize)> {
+    if d.is_cpu() {
+        return None;
+    }
+    d.mem_info().ok().flatten()
+}
+
+/// Drains every distinct GPU device cached by `select_device` (safe to call on idle unload or exit).
 pub fn trim_all_opened_gpu_pools() {
+    let mut seen = std::collections::HashSet::new();
     let devs: Vec<Device> = device_cache()
         .lock()
         .unwrap_or_else(|e| e.into_inner())
         .values()
+        .filter(|d| seen.insert(d.location()))
         .cloned()
         .collect();
     for d in devs {
@@ -374,7 +384,7 @@ pub fn is_rocm(d: &Device) -> bool {
 }
 
 // ---------------------------------------------------------------------------------------------
-// Per-(device_label, AccelOp) catch_unwind verification cache + fault injection
+// Per-(DeviceLocation, AccelOp) catch_unwind verification cache + fault injection
 // ---------------------------------------------------------------------------------------------
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -382,15 +392,17 @@ pub enum AccelOp {
     Matmul,
     Softmax,
     RmsNorm,
+    LayerNorm,
     DecoderOps,
+    FusedGateUpSilu,
     LmHeadArgmax,
     QuantQ8,
 }
 
-static ACCEL_VERDICTS: OnceLock<Mutex<HashMap<(String, AccelOp), bool>>> = OnceLock::new();
+static ACCEL_VERDICTS: OnceLock<Mutex<HashMap<(DeviceLocation, AccelOp), bool>>> = OnceLock::new();
 static ACCEL_FAULTS: OnceLock<Mutex<HashMap<AccelOp, bool>>> = OnceLock::new();
 
-fn accel_verdicts() -> &'static Mutex<HashMap<(String, AccelOp), bool>> {
+fn accel_verdicts() -> &'static Mutex<HashMap<(DeviceLocation, AccelOp), bool>> {
     ACCEL_VERDICTS.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
@@ -434,12 +446,12 @@ fn rel_err_f32(got: &Tensor, want: &Tensor) -> Result<f32> {
     Ok(if r.is_finite() { r } else { f32::INFINITY })
 }
 
-/// Verifies `op` once per `(device_label, op)` against CPU reference under `catch_unwind`.
+/// Verifies `op` once per `(DeviceLocation, op)` against CPU reference under `catch_unwind`.
 pub fn accel_op_ok(device: &Device, op: AccelOp) -> bool {
     if device.is_cpu() {
         return true;
     }
-    let key = (device_label(device), op);
+    let key = (device.location(), op);
     if let Some(&ok) = accel_verdicts().lock().unwrap_or_else(|e| e.into_inner()).get(&key) {
         return ok;
     }
@@ -457,15 +469,15 @@ pub fn accel_op_ok(device: &Device, op: AccelOp) -> bool {
     })) {
         Ok(Ok(err)) if err <= 5e-3 => true,
         Ok(Ok(err)) => {
-            eprintln!("[RAON-ACCEL] {} {:?}: rel_err={err:.2e} > 5e-3 -> fallback", key.0, op);
+            eprintln!("[RAON-ACCEL] {} {:?}: rel_err={err:.2e} > 5e-3 -> fallback", device_label(device), op);
             false
         }
         Ok(Err(e)) => {
-            eprintln!("[RAON-ACCEL] {} {:?}: probe error ({e}) -> fallback", key.0, op);
+            eprintln!("[RAON-ACCEL] {} {:?}: probe error ({e}) -> fallback", device_label(device), op);
             false
         }
         Err(_) => {
-            eprintln!("[RAON-ACCEL] {} {:?}: probe panicked -> fallback", key.0, op);
+            eprintln!("[RAON-ACCEL] {} {:?}: probe panicked -> fallback", device_label(device), op);
             false
         }
     };
@@ -499,6 +511,55 @@ fn probe_accel_op(device: &Device, op: AccelOp) -> Result<f32> {
                 false,
             )?;
             rel_err_f32(&got, &want)
+        }
+        AccelOp::LayerNorm => {
+            // Includes +1000.0 DC-offset probe (BUG LN-1) against two-pass f64 CPU reference.
+            let (rows, h) = (4usize, 128usize);
+            let x_vals: Vec<f32> = det_vec(rows * h, 6)
+                .into_iter()
+                .enumerate()
+                .map(|(i, v)| if i / h >= 2 { v * 0.05 + 1000.0 } else { v })
+                .collect();
+            let w_vals = det_vec(h, 7);
+            let b_vals = det_vec(h, 8);
+            let mut want_vals = vec![0.0f32; rows * h];
+            raon_cpu_kernels::layer_norm(&x_vals, h, &w_vals, Some(&b_vals), 1e-6, &mut want_vals);
+            let want = Tensor::from_vec(want_vals, (rows, h), &Device::Cpu)?;
+            let x_dev = Tensor::from_vec(x_vals, (rows, h), &Device::Cpu)?.to_device(device)?;
+            let w_dev = Tensor::from_vec(w_vals, h, &Device::Cpu)?.to_device(device)?;
+            let b_dev = Tensor::from_vec(b_vals, h, &Device::Cpu)?.to_device(device)?;
+            let got = candle_nn::ops::layer_norm(&x_dev, &w_dev, &b_dev, 1e-6)?;
+            rel_err_f32(&got, &want)
+        }
+        AccelOp::FusedGateUpSilu => {
+            if !(device.is_cuda() || is_rocm(device)) {
+                bail!("native fused_gate_up_silu requires CUDA or ROCm");
+            }
+            use candle_core::quantized::{GgmlDType, QMatMul, QTensor};
+            let x = Tensor::from_vec(det_vec(2 * 256, 20), (2, 256), &Device::Cpu)?;
+            let wg = Tensor::from_vec(det_vec(64 * 256, 21), (64, 256), &Device::Cpu)?;
+            let wu = Tensor::from_vec(det_vec(64 * 256, 22), (64, 256), &Device::Cpu)?;
+            let x_dev = x.to_device(device)?;
+            let wg_dev = wg.to_device(device)?;
+            let wu_dev = wu.to_device(device)?;
+            let mut worst = 0f32;
+            for dt in [
+                GgmlDType::Q8_0,
+                GgmlDType::Q4_0,
+                GgmlDType::Q4K,
+                GgmlDType::Q5K,
+                GgmlDType::Q6K,
+            ] {
+                let g_cpu = QTensor::quantize(&wg, dt)?.dequantize(&Device::Cpu)?;
+                let u_cpu = QTensor::quantize(&wu, dt)?.dequantize(&Device::Cpu)?;
+                let want = x.matmul(&g_cpu.t()?)?.silu()?.mul(&x.matmul(&u_cpu.t()?)?)?;
+                let qg = QMatMul::from_qtensor(QTensor::quantize(&wg_dev, dt)?)?;
+                let qu = QMatMul::from_qtensor(QTensor::quantize(&wu_dev, dt)?)?;
+                let got = qg.fused_gate_up_silu(&qu, &x_dev)?;
+                let err = rel_err_f32(&got, &want)?;
+                worst = worst.max(if err <= 1e-2 { err * 0.1 } else { err });
+            }
+            Ok(worst)
         }
         AccelOp::DecoderOps => {
             let x = Tensor::from_vec(det_vec(4 * 128, 10), (4, 128), &Device::Cpu)?;
@@ -673,11 +734,21 @@ mod tests {
             AccelOp::Matmul,
             AccelOp::Softmax,
             AccelOp::RmsNorm,
+            AccelOp::LayerNorm,
             AccelOp::DecoderOps,
             AccelOp::LmHeadArgmax,
             AccelOp::QuantQ8,
         ] {
             assert!(accel_op_ok(&dev, op), "accel_op_ok failed for {op:?} on {}", describe(&dev));
+        }
+        assert_eq!(
+            accel_op_ok(&dev, AccelOp::FusedGateUpSilu),
+            dev.is_cpu() || dev.is_cuda() || is_rocm(&dev),
+            "FusedGateUpSilu availability mismatch on {}",
+            describe(&dev)
+        );
+        if !dev.is_cpu() {
+            let _ = device_mem_info_of(&dev);
         }
         if !dev.is_cpu() {
             reset_accel_cache();

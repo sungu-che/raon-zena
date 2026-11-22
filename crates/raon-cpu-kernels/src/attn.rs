@@ -546,10 +546,51 @@ pub fn stream_attention_mla_hsd_f32(
     past_offset: usize,
     out: &mut [f32],
 ) {
+    stream_attention_mla_hsd_strided_f32(
+        q,
+        k,
+        v,
+        num_heads,
+        seq_q,
+        seq_kv,
+        dq,
+        dv,
+        seq_kv * dq,
+        seq_kv * dv,
+        scale,
+        causal,
+        past_offset,
+        out,
+    );
+}
+
+/// Zero-copy strided variant of [`stream_attention_mla_hsd_f32`] reading directly from
+/// pre-allocated `[H, cap, dq]` / `[H, cap, dv]` KV buffers where head `h` begins at
+/// `h * k_head_stride` / `h * v_head_stride` (`k_head_stride >= seq_kv * dq`,
+/// `v_head_stride >= seq_kv * dv`), eliminating per-token KV cache copies on CPU decode.
+#[allow(clippy::too_many_arguments)]
+pub fn stream_attention_mla_hsd_strided_f32(
+    q: &[f32],
+    k: &[f32],
+    v: &[f32],
+    num_heads: usize,
+    seq_q: usize,
+    seq_kv: usize,
+    dq: usize,
+    dv: usize,
+    k_head_stride: usize,
+    v_head_stride: usize,
+    scale: f32,
+    causal: bool,
+    past_offset: usize,
+    out: &mut [f32],
+) {
     assert!(num_heads > 0 && dq > 0 && dv > 0);
+    assert!(k_head_stride >= seq_kv * dq);
+    assert!(v_head_stride >= seq_kv * dv);
     assert_eq!(q.len(), num_heads * seq_q * dq);
-    assert_eq!(k.len(), num_heads * seq_kv * dq);
-    assert_eq!(v.len(), num_heads * seq_kv * dv);
+    assert!(k.len() >= (num_heads - 1) * k_head_stride + seq_kv * dq);
+    assert!(v.len() >= (num_heads - 1) * v_head_stride + seq_kv * dv);
     assert_eq!(out.len(), seq_q * num_heads * dv);
     if seq_q == 0 || seq_kv == 0 {
         out.fill(0.0);
@@ -564,8 +605,10 @@ pub fn stream_attention_mla_hsd_f32(
     let run_head = |head: usize| {
         let out_ptr = &out_ptr;
         let q_h = &q[head * seq_q * dq..(head + 1) * seq_q * dq];
-        let k_h = &k[head * seq_kv * dq..(head + 1) * seq_kv * dq];
-        let v_h = &v[head * seq_kv * dv..(head + 1) * seq_kv * dv];
+        let k_base = head * k_head_stride;
+        let v_base = head * v_head_stride;
+        let k_h = &k[k_base..k_base + seq_kv * dq];
+        let v_h = &v[v_base..v_base + seq_kv * dv];
 
         // Single-query MLA decode (seq_q == 1): compute q·k directly on k_h with SIMD dot,
         // eliminating per-head `kt` allocation and full KV-cache transpose on every decode token.
@@ -989,5 +1032,40 @@ mod tests {
         let want2 = reference_attn(&q2, &k2, &v2, 1, 101, &cfg, None);
         let err2 = out2.iter().zip(&want2).map(|(a, b)| (a - b).abs()).fold(0.0f32, f32::max);
         assert!(err2 < 1e-5, "seq_q=1 GQA max_err {err2}");
+
+        // 3) Zero-copy strided MLA decode directly over [H, cap, dq] / [H, cap, dv] (cap > seq_kv)
+        let cap = 256usize;
+        let mut k_strided = vec![f32::NAN; heads * cap * dq];
+        let mut v_strided = vec![f32::NAN; heads * cap * dv];
+        for h in 0..heads {
+            k_strided[h * cap * dq..h * cap * dq + seq_kv * dq]
+                .copy_from_slice(&k[h * seq_kv * dq..(h + 1) * seq_kv * dq]);
+            v_strided[h * cap * dv..h * cap * dv + seq_kv * dv]
+                .copy_from_slice(&v[h * seq_kv * dv..(h + 1) * seq_kv * dv]);
+        }
+        let mut out_strided = vec![0.0f32; heads * dv];
+        stream_attention_mla_hsd_strided_f32(
+            &q,
+            &k_strided,
+            &v_strided,
+            heads,
+            1,
+            seq_kv,
+            dq,
+            dv,
+            cap * dq,
+            cap * dv,
+            scale,
+            true,
+            past,
+            &mut out_strided,
+        );
+        assert!(out_strided.iter().all(|x| x.is_finite()), "strided MLA read NaN padding");
+        let strided_err = out_strided
+            .iter()
+            .zip(&out)
+            .map(|(a, b)| (a - b).abs())
+            .fold(0.0f32, f32::max);
+        assert!(strided_err < 1e-6, "strided MLA max diff vs contiguous {strided_err}");
     }
 }

@@ -402,29 +402,32 @@ pub fn precompute_label_similarity(
     web_rows: &[WebAnalyticTierRow],
     uia_regions: &[UiaInteractiveRegion],
 ) -> impl Fn(&str, &str) -> f32 {
-    let mut unique: Vec<&str> = Vec::with_capacity(web_rows.len() + uia_regions.len());
-    let mut seen = std::collections::HashSet::with_capacity(web_rows.len() + uia_regions.len());
-    for row in web_rows {
-        if !row.label.trim().is_empty() && seen.insert(row.label.as_str()) {
-            unique.push(row.label.as_str());
-        }
-    }
-    for reg in uia_regions {
-        if !reg.label.trim().is_empty() && !reg.sensitive && seen.insert(reg.label.as_str()) {
-            unique.push(reg.label.as_str());
-        }
-    }
-    let mut vecs: HashMap<String, Vec<f32>> = HashMap::with_capacity(unique.len());
-    if !unique.is_empty() {
-        let embedded = embedder.embed_batch(&unique);
-        for (label, mut v) in unique.into_iter().zip(embedded) {
-            let n = raon_cpu_kernels::dot_f32_simd(&v, &v).sqrt();
-            if n > 1e-8 {
-                for x in &mut v {
-                    *x /= n;
-                }
+    let mut vecs: HashMap<String, Vec<f32>> = HashMap::new();
+    if !web_rows.is_empty() && !uia_regions.is_empty() {
+        let mut unique: Vec<&str> = Vec::with_capacity(web_rows.len() + uia_regions.len());
+        let mut seen = std::collections::HashSet::with_capacity(web_rows.len() + uia_regions.len());
+        for row in web_rows {
+            if !row.label.trim().is_empty() && seen.insert(row.label.as_str()) {
+                unique.push(row.label.as_str());
             }
-            vecs.insert(label.to_string(), v);
+        }
+        for reg in uia_regions {
+            if !reg.label.trim().is_empty() && !reg.sensitive && seen.insert(reg.label.as_str()) {
+                unique.push(reg.label.as_str());
+            }
+        }
+        if !unique.is_empty() {
+            vecs.reserve(unique.len());
+            let embedded = embedder.embed_batch(&unique);
+            for (label, mut v) in unique.into_iter().zip(embedded) {
+                let n = raon_cpu_kernels::dot_f32_simd(&v, &v).sqrt();
+                if n > 1e-8 {
+                    for x in &mut v {
+                        *x /= n;
+                    }
+                }
+                vecs.insert(label.to_string(), v);
+            }
         }
     }
     move |a: &str, b: &str| -> f32 {

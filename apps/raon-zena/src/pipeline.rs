@@ -1348,11 +1348,13 @@ pub fn run(
                                 context.push(guard_line);
                             }
                             let q_snap = pd_bridge.rag.quarantine.lock().unwrap().clone();
+                            let active_cc = plan.scopes.cc.as_str();
                             let local_grades: HashMap<String, zena_core::claims::Grade> = pd_bridge
                                 .verdicts
                                 .records
-                                .keys()
-                                .cloned()
+                                .iter()
+                                .filter(|(_, rec)| active_cc.is_empty() || rec.cc == active_cc)
+                                .map(|(id, _)| id.clone())
                                 .collect::<Vec<_>>()
                                 .into_iter()
                                 .map(|id| {

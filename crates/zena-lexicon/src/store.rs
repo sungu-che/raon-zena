@@ -465,8 +465,14 @@ impl LexiconStore {
                 .filter(|(_, src)| src.as_str() != "seed" && src.as_str() != "vision")
                 .collect();
             extras.sort();
+            let node_idx: HashMap<String, usize> = lex
+                .nodes
+                .iter()
+                .enumerate()
+                .map(|(i, n)| (n.key.clone(), i))
+                .collect();
             for ((domain, role, text), _) in extras {
-                let Some(i) = lex.nodes.iter().position(|n| &n.key == domain) else {
+                let Some(&i) = node_idx.get(domain.as_str()) else {
                     continue;
                 };
                 let mut node = lex.nodes[i].clone();
@@ -943,32 +949,37 @@ impl LexiconStore {
 
     /// Restores every table to its state at `revision` (Lance time travel) and records that as a new revision.
     pub fn rollback(&self, revision: i64) -> Result<i64> {
-        let target = self
-            .history()?
-            .into_iter()
-            .find(|r| r.revision == revision)
-            .ok_or_else(|| anyhow!("revision {revision} is not held any more"))?;
         self.rt.block_on(async {
-            // The meta row of that revision carries its prompting and anchor model.
-            let m = self.table(META).await?.ok_or_else(|| anyhow!("no meta table"))?;
-            let mut old = None;
-            for v in m.list_versions().await? {
+            // Single reverse pass over META versions finds both the table versions and the
+            // prompting/anchor metadata of `revision`, avoiding two full history scans.
+            let m = self
+                .table(META)
+                .await?
+                .ok_or_else(|| anyhow!("revision {revision} is not held any more"))?;
+            let mut found: Option<(BTreeMap<String, u64>, (String, String, String, String))> = None;
+            for v in m.list_versions().await?.into_iter().rev() {
                 m.checkout(v.version).await?;
                 let batches: Vec<RecordBatch> = m.query().execute().await?.try_collect().await?;
                 if let Some(b) = batches
                     .iter()
                     .find(|b| b.num_rows() > 0 && col_i64(b, "revision").map(|r| r[0] == revision).unwrap_or(false))
                 {
-                    old = Some((
+                    let tables: BTreeMap<String, u64> =
+                        serde_json::from_str(&col_str(b, "tables")?[0]).unwrap_or_default();
+                    let old = (
                         col_str(b, "meta")?[0].clone(),
                         col_str(b, "prompting")?[0].clone(),
                         col_str(b, "anchor_model")?[0].clone(),
                         col_str(b, "anchor_signature")?[0].clone(),
-                    ));
+                    );
+                    found = Some((tables, old));
+                    break;
                 }
             }
             m.checkout_latest().await?;
-            for (name, version) in &target.tables {
+            let (tables, (meta, prompting, model, sig)) =
+                found.ok_or_else(|| anyhow!("revision {revision} is not held any more"))?;
+            for (name, version) in &tables {
                 let t = self.table_or_create(name).await?;
                 if t.version().await? != *version {
                     t.checkout(*version).await?;
@@ -978,7 +989,6 @@ impl LexiconStore {
             if self.table(PHRASES).await?.is_some() {
                 self.index_phrases().await?;
             }
-            let (meta, prompting, model, sig) = old.unwrap_or_default();
             self.commit(
                 &format!("rollback to {revision}"),
                 Some(&meta),

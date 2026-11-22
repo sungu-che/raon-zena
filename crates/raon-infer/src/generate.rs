@@ -141,17 +141,22 @@ impl Generator {
         stats.guard_rows_refined += s.rows_refined;
         stats.prefill_ms = t0.elapsed().as_secs_f64() * 1e3;
         let t1 = Instant::now();
-        let mut out: Vec<u32> = Vec::new();
+        let mut out: Vec<u32> = Vec::with_capacity(max_new.min(4096));
         let mut shown = 0usize;
+        let mut emitted_tokens = 0usize;
+        let mut anchor_str = String::new();
         while out.len() < max_new && !self.model.cfg.eos.contains(&next) {
             if is_cancelled() {
                 break;
             }
             out.push(next);
-            let text = self.decode(&out)?;
-            if text.len() > shown && text.is_char_boundary(shown) && !text.ends_with('\u{FFFD}') {
-                on_text(&text[shown..]);
-                shown = text.len();
+            if let Some(delta) = self.incremental_delta(
+                &out,
+                &mut shown,
+                &mut emitted_tokens,
+                &mut anchor_str,
+            )? {
+                on_text(&delta);
             }
             if out.len() == max_new || is_cancelled() {
                 break;
@@ -170,5 +175,45 @@ impl Generator {
         };
         crate::device::trim_idle_gpu_pool(self.model.device());
         Ok((self.decode(&out)?, stats))
+    }
+
+    /// O(1) anchored incremental token-stream decoding (avoids O(N²) full-sequence `decode(&out)`
+    /// per generated token), preserving UTF-8 multi-byte safety and falling back to full decode
+    /// whenever a tokenizer rewrites across the 1-token anchor boundary.
+    fn incremental_delta(
+        &self,
+        out: &[u32],
+        shown: &mut usize,
+        emitted_tokens: &mut usize,
+        anchor_str: &mut String,
+    ) -> Result<Option<String>> {
+        if *emitted_tokens > 0 {
+            let win = self.decode(&out[*emitted_tokens - 1..])?;
+            if win.ends_with('\u{FFFD}') {
+                return Ok(None);
+            }
+            if let Some(delta) = win.strip_prefix(anchor_str.as_str()) {
+                if !delta.is_empty() {
+                    let delta = delta.to_string();
+                    *shown += delta.len();
+                    *emitted_tokens = out.len();
+                    *anchor_str = self.decode(&out[out.len() - 1..])?;
+                    return Ok(Some(delta));
+                }
+                // Empty delta (e.g., silent/special token): keep anchor unless window grows large.
+                if out.len() - *emitted_tokens <= 8 {
+                    return Ok(None);
+                }
+            }
+        }
+        let text = self.decode(out)?;
+        if text.len() > *shown && text.is_char_boundary(*shown) && !text.ends_with('\u{FFFD}') {
+            let delta = text[*shown..].to_string();
+            *shown = text.len();
+            *emitted_tokens = out.len();
+            *anchor_str = self.decode(&out[out.len() - 1..])?;
+            return Ok(Some(delta));
+        }
+        Ok(None)
     }
 }

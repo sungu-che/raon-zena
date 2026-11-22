@@ -237,15 +237,24 @@ pub fn spawn(
                             t.wipe();
                         }
                         last_thumb = None;
+                        if gpu {
+                            raon_infer::device::trim_idle_gpu_pool(&dev);
+                        }
                         continue;
                     }
                     Err(e) => {
                         thumb.wipe();
                         eprintln!("[screen] encoder failed: {e:#}");
+                        if gpu {
+                            raon_infer::device::trim_idle_gpu_pool(&dev);
+                        }
                         continue;
                     }
                 };
                 drop(grid);
+                if gpu {
+                    raon_infer::device::trim_idle_gpu_pool(&dev);
+                }
                 let Some(top) = cfg.accept.accept(&reading.scores) else {
                     last_thumb = Some(thumb);
                     continue;

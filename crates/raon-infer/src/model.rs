@@ -139,10 +139,11 @@ fn helmert(n: usize) -> Vec<f32> {
 }
 
 struct MhcConsts {
-    q: Tensor,   // [n, n-1]
-    q_t: Tensor, // [n-1, n] precomputed transpose
-    b: Tensor,   // [n, n]  (I + 11ᵀ/n)/2
-    eye: Tensor, // [n, n]
+    q: Tensor,     // [n, n-1]
+    q_t: Tensor,   // [n-1, n] precomputed transpose
+    b: Tensor,     // [n, n]  (I + 11ᵀ/n)/2
+    inv_b: Tensor, // [n, n]  1 / b precomputed (avoids 48x/token broadcast_div)
+    eye: Tensor,   // [n, n]
 }
 
 struct Mhc {
@@ -206,7 +207,7 @@ impl Mhc {
             let tz_qt = tz_qt.reshape((t, m, n))?;
             k.q.unsqueeze(0)?.broadcast_as((t, n, m))?.contiguous()?.matmul(&tz_qt)?
         };
-        let rho = e.neg()?.broadcast_div(&k.b)?.reshape((t, n * n))?.max_keepdim(1)?.relu()?; // [T, 1]
+        let rho = e.neg()?.broadcast_mul(&k.inv_b)?.reshape((t, n * n))?.max_keepdim(1)?.relu()?; // [T, 1]
         let phi = e.broadcast_div(&(rho.affine(1.0, 1.0)?.unsqueeze(2)?))?.broadcast_add(&k.b)?;
         let h_res = (phi * self.gamma)?.broadcast_add(&self.eye_res)?;
         Ok((h_pre, h_post, h_res))
@@ -214,7 +215,8 @@ impl Mhc {
 }
 
 fn aggregate(stream: &Tensor, h_pre: &Tensor) -> candle_core::Result<Tensor> {
-    stream.broadcast_mul(&h_pre.unsqueeze(2)?)?.sum(1)
+    // [T, 1, n] @ [T, n, C] -> [T, 1, C] -> [T, C] without allocating a [T, n, C] temporary.
+    h_pre.unsqueeze(1)?.matmul(&stream.contiguous()?)?.squeeze(1)
 }
 
 fn mix(stream: &Tensor, branch: &Tensor, h_post: &Tensor, h_res: &Tensor) -> candle_core::Result<Tensor> {
@@ -337,8 +339,8 @@ impl Rda {
             .broadcast_mul(&self.a_exp)?;
         let log_alpha = match cfg.gate_lower_bound {
             Some(lb) => (sigmoid(&scaled)? * lb)?,
-            // -softplus(x)
-            None => (scaled.exp()?.affine(1.0, 1.0)?.log()? * -1.0)?,
+            // Numerically stable -softplus(x) = -(max(x, 0) + log1p(exp(-|x|))) avoiding exp overflow for x > 88.
+            None => (scaled.relu()? + scaled.abs()?.neg()?.exp()?.affine(1.0, 1.0)?.log()?)?.neg()?,
         };
         let beta = sigmoid(&beta_raw)?; // [T, H]
                                         // write gate sigmoid(b + δ) / erase gate sigmoid(b), realised as a value scale
@@ -507,6 +509,21 @@ impl KvState {
     }
 }
 
+fn cpu_f32_slice_if_zero_offset<'a>(
+    storage: &'a candle_core::Storage,
+    layout: &candle_core::Layout,
+) -> Option<&'a [f32]> {
+    if layout.start_offset() != 0 || !layout.is_contiguous() {
+        return None;
+    }
+    match storage {
+        candle_core::Storage::Cpu(candle_core::CpuStorage::F32(s)) => {
+            s.get(..layout.shape().elem_count())
+        }
+        _ => None,
+    }
+}
+
 struct Mla {
     q_a: Linear,
     q_a_norm: Tensor,
@@ -578,26 +595,60 @@ impl Mla {
         let scale = (dq as f64).powf(-0.5);
 
         let ctx = if !on_gpu && q.dtype() == DType::F32 {
-            // CPU F32: 64-key streaming MLA attention directly supporting dq=192, dv=128 with
-            // zero [H, T, L] score matrix allocation and zero K^T copy.
-            let qv = q.flatten_all()?.to_vec1::<f32>()?;
-            let kv_vec = key.contiguous()?.flatten_all()?.to_vec1::<f32>()?;
-            let vv = val.contiguous()?.flatten_all()?.to_vec1::<f32>()?;
+            // CPU F32: zero-copy strided 64-key streaming MLA attention directly over the
+            // pre-allocated [H, cap, dq] / [H, cap, dv] KV buffers (zero KV copy, zero score matrix).
             let mut out = vec![0.0f32; t * h * dv];
-            raon_cpu_kernels::stream_attention_mla_hsd_f32(
-                &qv,
-                &kv_vec,
-                &vv,
-                h,
-                t,
-                l,
-                dq,
-                dv,
-                scale as f32,
-                t > 1,
-                l - t,
-                &mut out,
-            );
+            let ran_strided = if let (Some(k_buf), Some(v_buf)) = (st.k.as_ref(), st.v.as_ref()) {
+                let (qs, ql) = q.storage_and_layout();
+                let (ks, kl) = k_buf.storage_and_layout();
+                let (vs, vl) = v_buf.storage_and_layout();
+                if let (Some(q_sl), Some(k_sl), Some(v_sl)) = (
+                    cpu_f32_slice_if_zero_offset(&qs, ql),
+                    cpu_f32_slice_if_zero_offset(&ks, kl),
+                    cpu_f32_slice_if_zero_offset(&vs, vl),
+                ) {
+                    raon_cpu_kernels::stream_attention_mla_hsd_strided_f32(
+                        q_sl,
+                        k_sl,
+                        v_sl,
+                        h,
+                        t,
+                        l,
+                        dq,
+                        dv,
+                        st.cap * dq,
+                        st.cap * dv,
+                        scale as f32,
+                        t > 1,
+                        l - t,
+                        &mut out,
+                    );
+                    true
+                } else {
+                    false
+                }
+            } else {
+                false
+            };
+            if !ran_strided {
+                let qv = q.flatten_all()?.to_vec1::<f32>()?;
+                let kv_vec = key.contiguous()?.flatten_all()?.to_vec1::<f32>()?;
+                let vv = val.contiguous()?.flatten_all()?.to_vec1::<f32>()?;
+                raon_cpu_kernels::stream_attention_mla_hsd_f32(
+                    &qv,
+                    &kv_vec,
+                    &vv,
+                    h,
+                    t,
+                    l,
+                    dq,
+                    dv,
+                    scale as f32,
+                    t > 1,
+                    l - t,
+                    &mut out,
+                );
+            }
             Tensor::from_vec(out, (t, h * dv), x.device())?
         } else {
             let kt = match key_t {
@@ -647,14 +698,18 @@ impl Mlp {
         })
     }
     fn forward(&self, x: &Tensor) -> Result<Tensor> {
-        let g = self.gate.forward(x)?;
-        let u = self.up.forward(x)?;
-        let a = if !x.device().is_cpu()
-            && crate::device::accel_op_ok(x.device(), crate::device::AccelOp::DecoderOps)
-        {
-            candle_core::decoder_ops::silu_mul(&g, &u).or_else(|_| g.silu()?.mul(&u))?
+        let a = if let Some(fused) = self.gate.fused_gate_up_silu(&self.up, x)? {
+            fused
         } else {
-            g.silu()?.mul(&u)?
+            let g = self.gate.forward(x)?;
+            let u = self.up.forward(x)?;
+            if !x.device().is_cpu()
+                && crate::device::accel_op_ok(x.device(), crate::device::AccelOp::DecoderOps)
+            {
+                candle_core::decoder_ops::silu_mul(&g, &u).or_else(|_| g.silu()?.mul(&u))?
+            } else {
+                g.silu()?.mul(&u)?
+            }
         };
         Ok(self.down.forward(&a)?)
     }
@@ -791,10 +846,13 @@ impl Model {
         let b: Vec<f32> = eye.iter().map(|e| 0.5 * (e + 1.0 / n as f32)).collect();
         let q = Tensor::from_vec(helmert(n), (n, n - 1), &dev)?;
         let q_t = q.t()?.contiguous()?;
+        let b_tensor = Tensor::from_vec(b, (n, n), &dev)?;
+        let inv_b = b_tensor.recip()?;
         let consts = MhcConsts {
             q,
             q_t,
-            b: Tensor::from_vec(b, (n, n), &dev)?,
+            b: b_tensor,
+            inv_b,
             eye: Tensor::from_vec(eye, (n, n), &dev)?,
         };
         let layers = (0..cfg.layers)
@@ -1007,6 +1065,18 @@ mod tests {
         kv.append(&k0, &v0, false)?;
         assert_eq!(kv.cap, 512, "planned_cap=300 should pre-allocate next_power_of_two(300)=512");
         assert_eq!(kv.len, 4);
+        Ok(())
+    }
+
+    #[test]
+    fn aggregate_matmul_matches_broadcast_mul_sum() -> Result<()> {
+        let dev = Device::Cpu;
+        let stream = Tensor::from_vec((0..3 * 4 * 16).map(|i| (i as f32) * 0.05 - 1.0).collect(), (3, 4, 16), &dev)?;
+        let h_pre = Tensor::from_vec((0..3 * 4).map(|i| 0.1 * (i as f32 + 1.0)).collect(), (3, 4), &dev)?;
+        let want = stream.broadcast_mul(&h_pre.unsqueeze(2)?)?.sum(1)?;
+        let got = aggregate(&stream, &h_pre)?;
+        let diff = (&want - &got)?.abs()?.flatten_all()?.max(0)?.to_scalar::<f32>()?;
+        assert!(diff < 1e-5, "aggregate matmul diff {diff}");
         Ok(())
     }
 }

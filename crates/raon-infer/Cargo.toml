@@ -12,7 +12,7 @@ anyhow = "1"
 candle-core.workspace = true
 candle-nn.workspace = true
 # Same optional ROCm helper crate logis-center pulls from the fork (device info, pool trimming).
-candle-rocm = { git = "https://github.com/sungu-che/candle-rocm-vulkan", rev = "6c3e5a13066db93148bbfbdee662caa2a0477f2f", optional = true }
+candle-rocm = { git = "https://github.com/sungu-che/candle-rocm-vulkan", rev = "855911873134d7a3f7206e78a9ac51cadfed28d3", optional = true }
 half.workspace = true
 rayon = "1.10"
 serde.workspace = true
