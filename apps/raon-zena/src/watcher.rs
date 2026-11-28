@@ -7,10 +7,11 @@
 //! 32 × 18 luma thumbnail are wiped immediately if `privacy_epoch` changes mid-pass or a `VisionKind::Privacy` screen
 //! is detected. Fixed 60 s blind backoff is gone: the pipeline's `PrivacyStateMachine` governs lock and resume.
 
-use premium_discount_sensor::naflex::{patchify_frame_with, redact_rgb_for_naflex};
-use premium_discount_sensor::thumb::{LumaThumb, WakeRule};
+use raon_vision::naflex::{patchify_frame_with, redact_rgb_for_naflex};
+use raon_vision::thumb::{LumaThumb, WakeRule};
 use raon_vision::{
-    Acceptance, AnchorBank, EpochWatch, LexiconAnchors, PassGuard, ScreenConfig, ScreenEncoder, WeightFormat,
+    Acceptance, AnchorBank, EpochWatch, LexiconAnchors, PassGuard, PerforationPolicy, ScreenConfig, ScreenEncoder,
+    WeightFormat,
 };
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -124,7 +125,7 @@ pub fn spawn(
                 .unwrap_or(if gpu { WeightFormat::F16 } else { WeightFormat::F32 });
             let mut screen = cfg.screen;
             if gpu && cfg.perforate_on_cpu_only {
-                screen.perforation = None;
+                screen.perforation = PerforationPolicy::Off;
             }
             let t = Instant::now();
             let (tower, scale, bias) = match raon_vision::load_vision(&cfg.model, &dev, format) {
@@ -141,10 +142,10 @@ pub fn spawn(
                 raon_infer::device::describe(&dev),
                 t.elapsed().as_secs_f32(),
                 screen.max_patches,
-                screen
-                    .perforation
-                    .map(|p| p.tag())
-                    .unwrap_or_else(|| "full".into())
+                match screen.perforation {
+                    PerforationPolicy::Off => "full".into(),
+                    p => p.tag(),
+                }
             );
             let enc = ScreenEncoder::new(tower, screen);
             let fingerprint = raon_vision::fingerprint(&cfg.model);
@@ -227,6 +228,7 @@ pub fn spawn(
                 let guard = PassGuard {
                     epoch: Some(EpochWatch::new(&privacy_epoch, captured_epoch)),
                     masked: &masked,
+                    ..PassGuard::default()
                 };
                 let reading = match enc.read_guarded(&mut grid, &bank, &guard) {
                     Ok(Some(r)) => r,
@@ -279,7 +281,7 @@ pub fn spawn(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use premium_discount_sensor::thumb::Wake;
+    use raon_vision::thumb::Wake;
 
     #[test]
     fn frames_are_zeroed_when_dropped_and_change_wakes_on_global_or_local_corner() {

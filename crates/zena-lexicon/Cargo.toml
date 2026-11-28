@@ -7,8 +7,8 @@ license.workspace = true
 
 [dependencies]
 zena-core = { path = "../zena-core" }
-# VisionKind is premium-discount-sensor's (shared with the vision anchor bank)
-premium-discount-sensor.workspace = true
+# VisionKind is premium-discount-sds's (model-free, shared with lv-screen's anchor bank)
+premium-discount-sds.workspace = true
 anyhow = "1"
 serde.workspace = true
 serde_json.workspace = true

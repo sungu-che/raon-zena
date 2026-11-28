@@ -35,24 +35,27 @@ candle-nn = "0.11.0"
 # zena_avatar_mcp::protocol), mcp (premium-discount-mcp: the MCP server and PdSyncClient / SyncLoop), sds (Welford and scope
 # backoff), manifest (pinned-download checks). None depends on LanceDB, Tauri, tokio or a model runtime, so they link into
 # this workspace (LanceDB 0.41) as they do into premium-discount-app (0.31).
+# The screen geometry (BBox, Polar, flow) and the screen kind (VisionKind) are model-free and live in premium-discount-sds
+# (`geometry`); the screen sensor, NaFlex patches and the SigLIP2 screen encoder are louis-vision's `lv-screen` (Tier 1),
+# pinned below to the revision that pins this premium-discount revision, so both resolve one premium-discount-sds.
 # Pinned by revision; to build against a checkout next to this one, uncomment the [patch] section at the end.
-premium-discount-identity = { git = "https://github.com/sungu-che/premium-discount", rev = "f8c68f88bce1ff240bff2c1b791b441c940edc6c" }
-premium-discount-verdict = { git = "https://github.com/sungu-che/premium-discount", rev = "f8c68f88bce1ff240bff2c1b791b441c940edc6c" }
-premium-discount-nav = { git = "https://github.com/sungu-che/premium-discount", rev = "f8c68f88bce1ff240bff2c1b791b441c940edc6c" }
-premium-discount-schema = { git = "https://github.com/sungu-che/premium-discount", rev = "f8c68f88bce1ff240bff2c1b791b441c940edc6c" }
-premium-discount-filter = { git = "https://github.com/sungu-che/premium-discount", rev = "f8c68f88bce1ff240bff2c1b791b441c940edc6c" }
-premium-discount-mcp-protocol = { git = "https://github.com/sungu-che/premium-discount", rev = "f8c68f88bce1ff240bff2c1b791b441c940edc6c" }
-premium-discount-mcp = { git = "https://github.com/sungu-che/premium-discount", rev = "f8c68f88bce1ff240bff2c1b791b441c940edc6c" }
-premium-discount-sds = { git = "https://github.com/sungu-che/premium-discount", rev = "f8c68f88bce1ff240bff2c1b791b441c940edc6c" }
-premium-discount-manifest = { git = "https://github.com/sungu-che/premium-discount", rev = "f8c68f88bce1ff240bff2c1b791b441c940edc6c" }
-premium-discount-sensor = { git = "https://github.com/sungu-che/premium-discount", rev = "f8c68f88bce1ff240bff2c1b791b441c940edc6c" }
-premium-discount-nlp = { git = "https://github.com/sungu-che/premium-discount", rev = "f8c68f88bce1ff240bff2c1b791b441c940edc6c", default-features = false }
-premium-discount-nms = { git = "https://github.com/sungu-che/premium-discount", rev = "f8c68f88bce1ff240bff2c1b791b441c940edc6c" }
+premium-discount-identity = { git = "https://github.com/Qntology/premium-discount", rev = "7810fdc8c145fa7b5ca28d32d21f8528dddfb3b6" }
+premium-discount-verdict = { git = "https://github.com/Qntology/premium-discount", rev = "7810fdc8c145fa7b5ca28d32d21f8528dddfb3b6" }
+premium-discount-nav = { git = "https://github.com/Qntology/premium-discount", rev = "7810fdc8c145fa7b5ca28d32d21f8528dddfb3b6" }
+premium-discount-schema = { git = "https://github.com/Qntology/premium-discount", rev = "7810fdc8c145fa7b5ca28d32d21f8528dddfb3b6" }
+premium-discount-filter = { git = "https://github.com/Qntology/premium-discount", rev = "7810fdc8c145fa7b5ca28d32d21f8528dddfb3b6" }
+premium-discount-mcp-protocol = { git = "https://github.com/Qntology/premium-discount", rev = "7810fdc8c145fa7b5ca28d32d21f8528dddfb3b6" }
+premium-discount-mcp = { git = "https://github.com/Qntology/premium-discount", rev = "7810fdc8c145fa7b5ca28d32d21f8528dddfb3b6" }
+premium-discount-sds = { git = "https://github.com/Qntology/premium-discount", rev = "7810fdc8c145fa7b5ca28d32d21f8528dddfb3b6" }
+premium-discount-manifest = { git = "https://github.com/Qntology/premium-discount", rev = "7810fdc8c145fa7b5ca28d32d21f8528dddfb3b6" }
+premium-discount-nlp = { git = "https://github.com/Qntology/premium-discount", rev = "7810fdc8c145fa7b5ca28d32d21f8528dddfb3b6", default-features = false }
+premium-discount-nms = { git = "https://github.com/Qntology/premium-discount", rev = "7810fdc8c145fa7b5ca28d32d21f8528dddfb3b6" }
 # Window math is used without its Win32 lookup (feature `win32`); turn it on where an app needs it
-premium-discount-window = { git = "https://github.com/sungu-che/premium-discount", rev = "f8c68f88bce1ff240bff2c1b791b441c940edc6c", default-features = false }
-premium-discount-relay = { git = "https://github.com/sungu-che/premium-discount", rev = "f8c68f88bce1ff240bff2c1b791b441c940edc6c" }
-premium-discount-quant = { git = "https://github.com/sungu-che/premium-discount", rev = "f8c68f88bce1ff240bff2c1b791b441c940edc6c" }
-premium-discount-vision = { git = "https://github.com/sungu-che/premium-discount", rev = "f8c68f88bce1ff240bff2c1b791b441c940edc6c" }
+premium-discount-window = { git = "https://github.com/Qntology/premium-discount", rev = "7810fdc8c145fa7b5ca28d32d21f8528dddfb3b6", default-features = false }
+premium-discount-relay = { git = "https://github.com/Qntology/premium-discount", rev = "7810fdc8c145fa7b5ca28d32d21f8528dddfb3b6" }
+premium-discount-quant = { git = "https://github.com/Qntology/premium-discount", rev = "7810fdc8c145fa7b5ca28d32d21f8528dddfb3b6" }
+# louis-vision Tier 1 screen vision (LogLumSensor, ROI tracker, NaFlex, SigLIP2 screen encoder, anchor bank, perforated pass)
+lv-screen = { git = "https://github.com/Qntology/louis-vision", rev = "a2dd50a682720c622db76450c003b3ffd6785644" }
 
 [profile.release]
 opt-level = 3
@@ -72,8 +75,8 @@ debug = false
 # so both workspaces build one candle. To build against a local checkout, swap the git lines for
 # `path = "../candle-rocm-vulkan/candle-core"` etc.
 [patch.crates-io]
-candle-core = { git = "https://github.com/sungu-che/candle-rocm-vulkan", rev = "36c88e3d57de7a1459ac7d228c88f0cf63990356" }
-candle-nn = { git = "https://github.com/sungu-che/candle-rocm-vulkan", rev = "36c88e3d57de7a1459ac7d228c88f0cf63990356" }
+candle-core = { git = "https://github.com/Qntology/candle-rocm-vulkan", rev = "f73415d4d149d7949e8a6a94911af670e4e10f7f" }
+candle-nn = { git = "https://github.com/Qntology/candle-rocm-vulkan", rev = "f73415d4d149d7949e8a6a94911af670e4e10f7f" }
 
 [profile.dev.package.candle-core]
 opt-level = 3
@@ -89,7 +92,7 @@ opt-level = 3
 opt-level = 3
 [profile.dev.package.raon-vision]
 opt-level = 3
-[profile.dev.package.premium-discount-sensor]
+[profile.dev.package.lv-screen]
 opt-level = 3
 
 # Local parallel development with ../premium-discount:
@@ -103,10 +106,15 @@ opt-level = 3
 # premium-discount-mcp = { path = "../premium-discount/crates/premium-discount-mcp" }
 # premium-discount-sds = { path = "../premium-discount/crates/premium-discount-sds" }
 # premium-discount-manifest = { path = "../premium-discount/crates/premium-discount-manifest" }
-# premium-discount-sensor = { path = "../premium-discount/crates/premium-discount-sensor" }
 # premium-discount-nlp = { path = "../premium-discount/crates/premium-discount-nlp" }
 # premium-discount-nms = { path = "../premium-discount/crates/premium-discount-nms" }
 # premium-discount-window = { path = "../premium-discount/crates/premium-discount-window" }
 # premium-discount-quant = { path = "../premium-discount/crates/premium-discount-quant" }
-# premium-discount-vision = { path = "../premium-discount/crates/premium-discount-vision" }
 # premium-discount-relay = { path = "../premium-discount/crates/premium-discount-relay" }
+# premium-discount-cpu-kernels = { path = "../premium-discount/crates/premium-discount-cpu-kernels" }
+# premium-discount-eval = { path = "../premium-discount/crates/premium-discount-eval" }
+# [patch."https://github.com/Qntology/louis-vision"]
+# lv-screen = { path = "../louis-vision/crates/lv-screen" }
+# lv-core = { path = "../louis-vision/crates/lv-core" }
+# lv-sds = { path = "../louis-vision/crates/lv-sds" }
+# lv-kernels = { path = "../louis-vision/crates/lv-kernels" }

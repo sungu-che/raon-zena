@@ -193,8 +193,8 @@ pub struct Node {
     pub action: Action,
 }
 
-/// The screen kinds (scene · event · privacy): premium-discount-sensor's, shared with the vision anchor bank.
-pub use premium_discount_sensor::VisionKind;
+/// The screen kinds (scene · event · privacy): premium-discount-sds's model-free value, shared with lv-screen's anchor bank.
+pub use premium_discount_sds::geometry::VisionKind;
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct VisionNode {

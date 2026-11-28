@@ -787,7 +787,7 @@ dependencies = [
 [[package]]
 name = "candle-core"
 version = "0.11.0"
-source = "git+https://github.com/sungu-che/candle-rocm-vulkan?rev=36c88e3d57de7a1459ac7d228c88f0cf63990356#36c88e3d57de7a1459ac7d228c88f0cf63990356"
+source = "git+https://github.com/Qntology/candle-rocm-vulkan?rev=f73415d4d149d7949e8a6a94911af670e4e10f7f#f73415d4d149d7949e8a6a94911af670e4e10f7f"
 dependencies = [
  "ash",
  "byteorder",
@@ -847,7 +847,7 @@ dependencies = [
 [[package]]
 name = "candle-nn"
 version = "0.11.0"
-source = "git+https://github.com/sungu-che/candle-rocm-vulkan?rev=36c88e3d57de7a1459ac7d228c88f0cf63990356#36c88e3d57de7a1459ac7d228c88f0cf63990356"
+source = "git+https://github.com/Qntology/candle-rocm-vulkan?rev=f73415d4d149d7949e8a6a94911af670e4e10f7f#f73415d4d149d7949e8a6a94911af670e4e10f7f"
 dependencies = [
  "candle-core",
  "candle-metal-kernels",
@@ -864,7 +864,7 @@ dependencies = [
 [[package]]
 name = "candle-rocm"
 version = "0.2.0"
-source = "git+https://github.com/sungu-che/candle-rocm-vulkan?rev=36c88e3d57de7a1459ac7d228c88f0cf63990356#36c88e3d57de7a1459ac7d228c88f0cf63990356"
+source = "git+https://github.com/Qntology/candle-rocm-vulkan?rev=f73415d4d149d7949e8a6a94911af670e4e10f7f#f73415d4d149d7949e8a6a94911af670e4e10f7f"
 dependencies = [
  "candle-core",
 ]
@@ -3146,7 +3146,7 @@ checksum = "7f24254aa9a54b5c858eaee2f5bccdb46aaf0e486a595ed5fd8f86ba55232a70"
 [[package]]
 name = "hip-runtime"
 version = "0.2.0"
-source = "git+https://github.com/sungu-che/candle-rocm-vulkan?rev=36c88e3d57de7a1459ac7d228c88f0cf63990356#36c88e3d57de7a1459ac7d228c88f0cf63990356"
+source = "git+https://github.com/Qntology/candle-rocm-vulkan?rev=f73415d4d149d7949e8a6a94911af670e4e10f7f#f73415d4d149d7949e8a6a94911af670e4e10f7f"
 dependencies = [
  "hip-sys",
 ]
@@ -3154,7 +3154,7 @@ dependencies = [
 [[package]]
 name = "hip-sys"
 version = "0.2.0"
-source = "git+https://github.com/sungu-che/candle-rocm-vulkan?rev=36c88e3d57de7a1459ac7d228c88f0cf63990356#36c88e3d57de7a1459ac7d228c88f0cf63990356"
+source = "git+https://github.com/Qntology/candle-rocm-vulkan?rev=f73415d4d149d7949e8a6a94911af670e4e10f7f#f73415d4d149d7949e8a6a94911af670e4e10f7f"
 
 [[package]]
 name = "hmac"
@@ -3477,11 +3477,22 @@ checksum = "85ab80394333c02fe689eaf900ab500fbd0c2213da414687ebf995a65d5a6104"
 dependencies = [
  "bytemuck",
  "byteorder-lite",
+ "image-webp",
  "moxcms",
  "num-traits",
  "png",
  "zune-core",
  "zune-jpeg",
+]
+
+[[package]]
+name = "image-webp"
+version = "0.2.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "525e9ff3e1a4be2fbea1fdf0e98686a6d98b4d8f937e1bf7402245af1909e8c3"
+dependencies = [
+ "byteorder-lite",
+ "quick-error",
 ]
 
 [[package]]
@@ -4649,6 +4660,78 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4050469837a6ff301cd14c1f8f24f88549e6d548f24f64e2148eb0f72cebc51f"
 
 [[package]]
+name = "lv-core"
+version = "0.1.0"
+source = "git+https://github.com/Qntology/louis-vision?rev=a2dd50a682720c622db76450c003b3ffd6785644#a2dd50a682720c622db76450c003b3ffd6785644"
+dependencies = [
+ "anyhow",
+ "candle-core",
+ "candle-nn",
+ "candle-rocm",
+ "half",
+ "image",
+ "lv-kernels",
+ "lv-sds",
+ "memmap2",
+ "once_cell",
+ "premium-discount-cpu-kernels",
+ "premium-discount-eval",
+ "premium-discount-nms",
+ "premium-discount-quant",
+ "premium-discount-relay",
+ "rayon",
+ "safetensors 0.8.0",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "smallvec",
+ "thiserror 2.0.21",
+ "tokenizers",
+ "windows-sys 0.61.2",
+ "zeroize",
+]
+
+[[package]]
+name = "lv-kernels"
+version = "0.1.0"
+source = "git+https://github.com/Qntology/louis-vision?rev=a2dd50a682720c622db76450c003b3ffd6785644#a2dd50a682720c622db76450c003b3ffd6785644"
+dependencies = [
+ "premium-discount-cpu-kernels",
+ "rayon",
+]
+
+[[package]]
+name = "lv-screen"
+version = "0.1.0"
+source = "git+https://github.com/Qntology/louis-vision?rev=a2dd50a682720c622db76450c003b3ffd6785644#a2dd50a682720c622db76450c003b3ffd6785644"
+dependencies = [
+ "anyhow",
+ "candle-core",
+ "candle-nn",
+ "lv-core",
+ "lv-kernels",
+ "lv-sds",
+ "premium-discount-eval",
+ "premium-discount-quant",
+ "serde",
+ "serde_json",
+ "tokenizers",
+ "zeroize",
+]
+
+[[package]]
+name = "lv-sds"
+version = "0.1.0"
+source = "git+https://github.com/Qntology/louis-vision?rev=a2dd50a682720c622db76450c003b3ffd6785644#a2dd50a682720c622db76450c003b3ffd6785644"
+dependencies = [
+ "premium-discount-sds",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "zeroize",
+]
+
+[[package]]
 name = "lz4"
 version = "1.28.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5592,7 +5675,7 @@ dependencies = [
 [[package]]
 name = "onnxruntime"
 version = "0.0.14"
-source = "git+https://github.com/sungu-che/premium-discount?rev=f8c68f88bce1ff240bff2c1b791b441c940edc6c#f8c68f88bce1ff240bff2c1b791b441c940edc6c"
+source = "git+https://github.com/Qntology/premium-discount?rev=7810fdc8c145fa7b5ca28d32d21f8528dddfb3b6#7810fdc8c145fa7b5ca28d32d21f8528dddfb3b6"
 dependencies = [
  "lazy_static",
  "ndarray 0.15.6",
@@ -5604,7 +5687,7 @@ dependencies = [
 [[package]]
 name = "onnxruntime-sys"
 version = "0.0.14"
-source = "git+https://github.com/sungu-che/premium-discount?rev=f8c68f88bce1ff240bff2c1b791b441c940edc6c#f8c68f88bce1ff240bff2c1b791b441c940edc6c"
+source = "git+https://github.com/Qntology/premium-discount?rev=7810fdc8c145fa7b5ca28d32d21f8528dddfb3b6#7810fdc8c145fa7b5ca28d32d21f8528dddfb3b6"
 dependencies = [
  "flate2",
  "libloading 0.8.9",
@@ -5921,20 +6004,31 @@ dependencies = [
 [[package]]
 name = "premium-discount-cpu-kernels"
 version = "0.1.0"
-source = "git+https://github.com/sungu-che/premium-discount?rev=f8c68f88bce1ff240bff2c1b791b441c940edc6c#f8c68f88bce1ff240bff2c1b791b441c940edc6c"
+source = "git+https://github.com/Qntology/premium-discount?rev=7810fdc8c145fa7b5ca28d32d21f8528dddfb3b6#7810fdc8c145fa7b5ca28d32d21f8528dddfb3b6"
 dependencies = [
+ "half",
  "rayon",
+]
+
+[[package]]
+name = "premium-discount-eval"
+version = "0.1.0"
+source = "git+https://github.com/Qntology/premium-discount?rev=7810fdc8c145fa7b5ca28d32d21f8528dddfb3b6#7810fdc8c145fa7b5ca28d32d21f8528dddfb3b6"
+dependencies = [
+ "anyhow",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]
 name = "premium-discount-filter"
 version = "0.1.0"
-source = "git+https://github.com/sungu-che/premium-discount?rev=f8c68f88bce1ff240bff2c1b791b441c940edc6c#f8c68f88bce1ff240bff2c1b791b441c940edc6c"
+source = "git+https://github.com/Qntology/premium-discount?rev=7810fdc8c145fa7b5ca28d32d21f8528dddfb3b6#7810fdc8c145fa7b5ca28d32d21f8528dddfb3b6"
 
 [[package]]
 name = "premium-discount-identity"
 version = "0.1.0"
-source = "git+https://github.com/sungu-che/premium-discount?rev=f8c68f88bce1ff240bff2c1b791b441c940edc6c#f8c68f88bce1ff240bff2c1b791b441c940edc6c"
+source = "git+https://github.com/Qntology/premium-discount?rev=7810fdc8c145fa7b5ca28d32d21f8528dddfb3b6#7810fdc8c145fa7b5ca28d32d21f8528dddfb3b6"
 dependencies = [
  "getrandom 0.3.4",
  "hmac",
@@ -5948,7 +6042,7 @@ dependencies = [
 [[package]]
 name = "premium-discount-manifest"
 version = "0.1.0"
-source = "git+https://github.com/sungu-che/premium-discount?rev=f8c68f88bce1ff240bff2c1b791b441c940edc6c#f8c68f88bce1ff240bff2c1b791b441c940edc6c"
+source = "git+https://github.com/Qntology/premium-discount?rev=7810fdc8c145fa7b5ca28d32d21f8528dddfb3b6#7810fdc8c145fa7b5ca28d32d21f8528dddfb3b6"
 dependencies = [
  "sha2 0.10.9",
 ]
@@ -5956,7 +6050,7 @@ dependencies = [
 [[package]]
 name = "premium-discount-mcp"
 version = "0.1.0"
-source = "git+https://github.com/sungu-che/premium-discount?rev=f8c68f88bce1ff240bff2c1b791b441c940edc6c#f8c68f88bce1ff240bff2c1b791b441c940edc6c"
+source = "git+https://github.com/Qntology/premium-discount?rev=7810fdc8c145fa7b5ca28d32d21f8528dddfb3b6#7810fdc8c145fa7b5ca28d32d21f8528dddfb3b6"
 dependencies = [
  "anyhow",
  "premium-discount-filter",
@@ -5972,7 +6066,7 @@ dependencies = [
 [[package]]
 name = "premium-discount-mcp-protocol"
 version = "0.1.0"
-source = "git+https://github.com/sungu-che/premium-discount?rev=f8c68f88bce1ff240bff2c1b791b441c940edc6c#f8c68f88bce1ff240bff2c1b791b441c940edc6c"
+source = "git+https://github.com/Qntology/premium-discount?rev=7810fdc8c145fa7b5ca28d32d21f8528dddfb3b6#7810fdc8c145fa7b5ca28d32d21f8528dddfb3b6"
 dependencies = [
  "anyhow",
  "serde_json",
@@ -5981,7 +6075,7 @@ dependencies = [
 [[package]]
 name = "premium-discount-nav"
 version = "0.1.0"
-source = "git+https://github.com/sungu-che/premium-discount?rev=f8c68f88bce1ff240bff2c1b791b441c940edc6c#f8c68f88bce1ff240bff2c1b791b441c940edc6c"
+source = "git+https://github.com/Qntology/premium-discount?rev=7810fdc8c145fa7b5ca28d32d21f8528dddfb3b6#7810fdc8c145fa7b5ca28d32d21f8528dddfb3b6"
 dependencies = [
  "premium-discount-identity",
  "premium-discount-sds",
@@ -5992,11 +6086,13 @@ dependencies = [
 [[package]]
 name = "premium-discount-nlp"
 version = "0.1.0"
-source = "git+https://github.com/sungu-che/premium-discount?rev=f8c68f88bce1ff240bff2c1b791b441c940edc6c#f8c68f88bce1ff240bff2c1b791b441c940edc6c"
+source = "git+https://github.com/Qntology/premium-discount?rev=7810fdc8c145fa7b5ca28d32d21f8528dddfb3b6#7810fdc8c145fa7b5ca28d32d21f8528dddfb3b6"
 dependencies = [
  "anyhow",
  "candle-core",
  "candle-nn",
+ "half",
+ "memmap2",
  "ndarray 0.15.6",
  "once_cell",
  "onnxruntime",
@@ -6011,44 +6107,48 @@ dependencies = [
 [[package]]
 name = "premium-discount-nms"
 version = "0.1.0"
-source = "git+https://github.com/sungu-che/premium-discount?rev=f8c68f88bce1ff240bff2c1b791b441c940edc6c#f8c68f88bce1ff240bff2c1b791b441c940edc6c"
+source = "git+https://github.com/Qntology/premium-discount?rev=7810fdc8c145fa7b5ca28d32d21f8528dddfb3b6#7810fdc8c145fa7b5ca28d32d21f8528dddfb3b6"
 dependencies = [
  "anyhow",
  "candle-core",
  "premium-discount-cpu-kernels",
  "premium-discount-nlp",
  "premium-discount-sds",
- "premium-discount-sensor",
  "serde",
 ]
 
 [[package]]
 name = "premium-discount-quant"
 version = "0.1.0"
-source = "git+https://github.com/sungu-che/premium-discount?rev=f8c68f88bce1ff240bff2c1b791b441c940edc6c#f8c68f88bce1ff240bff2c1b791b441c940edc6c"
+source = "git+https://github.com/Qntology/premium-discount?rev=7810fdc8c145fa7b5ca28d32d21f8528dddfb3b6#7810fdc8c145fa7b5ca28d32d21f8528dddfb3b6"
 dependencies = [
  "anyhow",
  "half",
  "memmap2",
  "premium-discount-cpu-kernels",
+ "premium-discount-manifest",
+ "premium-discount-sds",
  "rayon",
  "serde",
  "serde_json",
+ "sha2 0.10.9",
+ "unicode-normalization",
 ]
 
 [[package]]
 name = "premium-discount-relay"
 version = "0.1.0"
-source = "git+https://github.com/sungu-che/premium-discount?rev=f8c68f88bce1ff240bff2c1b791b441c940edc6c#f8c68f88bce1ff240bff2c1b791b441c940edc6c"
+source = "git+https://github.com/Qntology/premium-discount?rev=7810fdc8c145fa7b5ca28d32d21f8528dddfb3b6#7810fdc8c145fa7b5ca28d32d21f8528dddfb3b6"
 dependencies = [
  "premium-discount-nms",
  "premium-discount-sds",
+ "serde",
 ]
 
 [[package]]
 name = "premium-discount-schema"
 version = "0.1.0"
-source = "git+https://github.com/sungu-che/premium-discount?rev=f8c68f88bce1ff240bff2c1b791b441c940edc6c#f8c68f88bce1ff240bff2c1b791b441c940edc6c"
+source = "git+https://github.com/Qntology/premium-discount?rev=7810fdc8c145fa7b5ca28d32d21f8528dddfb3b6#7810fdc8c145fa7b5ca28d32d21f8528dddfb3b6"
 dependencies = [
  "anyhow",
  "premium-discount-identity",
@@ -6060,50 +6160,27 @@ dependencies = [
 [[package]]
 name = "premium-discount-sds"
 version = "0.1.0"
-source = "git+https://github.com/sungu-che/premium-discount?rev=f8c68f88bce1ff240bff2c1b791b441c940edc6c#f8c68f88bce1ff240bff2c1b791b441c940edc6c"
+source = "git+https://github.com/Qntology/premium-discount?rev=7810fdc8c145fa7b5ca28d32d21f8528dddfb3b6#7810fdc8c145fa7b5ca28d32d21f8528dddfb3b6"
 dependencies = [
  "anyhow",
  "serde",
  "serde_json",
-]
-
-[[package]]
-name = "premium-discount-sensor"
-version = "0.1.0"
-source = "git+https://github.com/sungu-che/premium-discount?rev=f8c68f88bce1ff240bff2c1b791b441c940edc6c#f8c68f88bce1ff240bff2c1b791b441c940edc6c"
-dependencies = [
- "serde",
+ "sha2 0.10.9",
  "zeroize",
 ]
 
 [[package]]
 name = "premium-discount-verdict"
 version = "0.1.0"
-source = "git+https://github.com/sungu-che/premium-discount?rev=f8c68f88bce1ff240bff2c1b791b441c940edc6c#f8c68f88bce1ff240bff2c1b791b441c940edc6c"
+source = "git+https://github.com/Qntology/premium-discount?rev=7810fdc8c145fa7b5ca28d32d21f8528dddfb3b6#7810fdc8c145fa7b5ca28d32d21f8528dddfb3b6"
 dependencies = [
  "serde",
-]
-
-[[package]]
-name = "premium-discount-vision"
-version = "0.1.0"
-source = "git+https://github.com/sungu-che/premium-discount?rev=f8c68f88bce1ff240bff2c1b791b441c940edc6c#f8c68f88bce1ff240bff2c1b791b441c940edc6c"
-dependencies = [
- "anyhow",
- "candle-core",
- "candle-nn",
- "premium-discount-cpu-kernels",
- "premium-discount-quant",
- "premium-discount-sensor",
- "serde",
- "serde_json",
- "tokenizers",
 ]
 
 [[package]]
 name = "premium-discount-window"
 version = "0.1.0"
-source = "git+https://github.com/sungu-che/premium-discount?rev=f8c68f88bce1ff240bff2c1b791b441c940edc6c#f8c68f88bce1ff240bff2c1b791b441c940edc6c"
+source = "git+https://github.com/Qntology/premium-discount?rev=7810fdc8c145fa7b5ca28d32d21f8528dddfb3b6#7810fdc8c145fa7b5ca28d32d21f8528dddfb3b6"
 dependencies = [
  "windows-sys 0.61.2",
 ]
@@ -6261,6 +6338,12 @@ name = "pxfm"
 version = "0.1.30"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d55d956fa96f5ec02be2e13af0e20391a5aa83d6a074e3ad368959d0fab299ea"
+
+[[package]]
+name = "quick-error"
+version = "2.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a993555f31e5a609f617c12db6250dedcac1b0a85076912c436e6fc9b2c8e6a3"
 
 [[package]]
 name = "quick-xml"
@@ -6511,7 +6594,7 @@ name = "raon-vision"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "premium-discount-vision",
+ "lv-screen",
  "zena-lexicon",
 ]
 
@@ -6531,7 +6614,6 @@ dependencies = [
  "premium-discount-nav",
  "premium-discount-relay",
  "premium-discount-schema",
- "premium-discount-sensor",
  "premium-discount-window",
  "raon-cpu-kernels",
  "raon-infer",
@@ -9247,7 +9329,8 @@ dependencies = [
 name = "zena-core"
 version = "0.1.0"
 dependencies = [
- "premium-discount-sensor",
+ "premium-discount-nav",
+ "premium-discount-sds",
  "premium-discount-window",
  "serde",
  "serde_json",
@@ -9260,7 +9343,7 @@ dependencies = [
  "anyhow",
  "futures",
  "lancedb",
- "premium-discount-sensor",
+ "premium-discount-sds",
  "serde",
  "serde_json",
  "tokio",
@@ -9272,7 +9355,6 @@ name = "zena-lexicon-cli"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "premium-discount-sensor",
  "raon-infer",
  "raon-vision",
  "serde_json",
@@ -9343,6 +9425,20 @@ name = "zeroize"
 version = "1.9.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e13084392c5e4bc371903e2935a5eaeed24905a7511356b883835e18a78f6879"
+dependencies = [
+ "zeroize_derive",
+]
+
+[[package]]
+name = "zeroize_derive"
+version = "1.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3c50655cbb0fe3fc43170059e702f1ce5e19b84cec58dc87b037a09935c2f328"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.119",
+]
 
 [[package]]
 name = "zerotrie"

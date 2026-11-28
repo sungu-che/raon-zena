@@ -38,8 +38,8 @@ use premium_discount_nav::{
     ZeroPixelProbe,
 };
 use premium_discount_schema::envelope;
-use premium_discount_sensor::naflex::bgra_to_rgb;
-use premium_discount_sensor::{extract_rois, LogLumSensor, PurgableSensor, RoiTracker};
+use raon_vision::naflex::bgra_to_rgb;
+use raon_vision::{extract_rois, LogLumSensor, PurgableSensor, RoiTracker};
 use premium_discount_window::{
     assess_surfaces, foreground_window, visible_windows_intersecting, PxRect,
 };

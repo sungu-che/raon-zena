@@ -234,17 +234,19 @@ fn main() -> Result<()> {
             if bank.is_empty() {
                 bail!("no screen domain is anchored yet: run `zena-lexicon anchors` first");
             }
-            let perforation = if pass == "full" {
-                None
-            } else {
-                Some(raon_vision::PerforatedCfg::parse(&pass).ok_or_else(|| anyhow!("unknown --pass {pass}"))?)
+            let perforation = match pass.as_str() {
+                "full" => raon_vision::PerforationPolicy::Off,
+                "auto" => raon_vision::PerforationPolicy::Auto,
+                p => raon_vision::PerforationPolicy::Forced(
+                    raon_vision::PerforatedCfg::parse(p).ok_or_else(|| anyhow!("unknown --pass {pass}"))?,
+                ),
             };
             let cfg = raon_vision::ScreenConfig {
                 max_patches: patches,
                 perforation,
                 seed_labels: 3,
             };
-            let grid = premium_discount_sensor::naflex::patchify_frame_with(&rgb, w, h, patches, &raon_vision::preprocess_for(&model));
+            let grid = raon_vision::naflex::patchify_frame_with(&rgb, w, h, patches, &raon_vision::preprocess_for(&model));
             let r = raon_vision::screen::read_pass(&tower, &cfg, &grid, &bank)?;
             println!(
                 "{w}x{h} → {}x{} grid, {} of {} tokens through the encoder, {:.0} ms",

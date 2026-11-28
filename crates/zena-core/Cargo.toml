@@ -6,8 +6,10 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
-# Screen geometry (BBox, Polar, flow) lives in premium-discount-sensor
-premium-discount-sensor.workspace = true
+# Screen geometry (BBox, Polar, flow) is premium-discount-sds's model-free `geometry`
+premium-discount-sds.workspace = true
+# 발화 병합(SpeechCoalescer): premium-discount-nav 의 순수 상태 기계
+premium-discount-nav.workspace = true
 # Window style bits, viewport, hover alpha, frame budget (shared with premium-discount-app's overlay)
 premium-discount-window.workspace = true
 serde.workspace = true

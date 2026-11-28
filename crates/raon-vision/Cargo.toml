@@ -6,13 +6,13 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
-premium-discount-vision.workspace = true
+lv-screen.workspace = true
 zena-lexicon = { path = "../zena-lexicon" }
 anyhow = "1"
 
 [features]
 default = []
-cuda = ["premium-discount-vision/cuda"]
-rocm = ["premium-discount-vision/rocm"]
-vulkan = ["premium-discount-vision/vulkan"]
-metal = ["premium-discount-vision/metal"]
+cuda = ["lv-screen/cuda"]
+rocm = ["lv-screen/rocm"]
+vulkan = ["lv-screen/vulkan"]
+metal = ["lv-screen/metal"]

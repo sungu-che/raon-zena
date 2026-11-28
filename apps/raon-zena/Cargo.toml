@@ -9,7 +9,6 @@ license.workspace = true
 raon-cpu-kernels.workspace = true
 zena-core = { path = "../../crates/zena-core" }
 zena-verdict = { path = "../../crates/zena-verdict" }
-premium-discount-sensor.workspace = true
 premium-discount-identity.workspace = true
 premium-discount-mcp.workspace = true
 premium-discount-nav.workspace = true

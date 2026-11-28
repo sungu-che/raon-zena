@@ -1,14 +1,14 @@
 //! # raon-vision
 //!
-//! Raon Zena's screen encoder: premium-discount's `premium-discount-vision` (the SigLIP2 encoder that started here),
-//! re-exported, plus the glue to the word dictionary (`zena-lexicon`): the vision nodes as anchor-bank domains and the
-//! dictionary's prompt templates for the anchors.
+//! Raon Zena's screen encoder: louis-vision's `lv-screen` (the SigLIP2 encoder that started here, now with the screen
+//! sensor, NaFlex patches and the budgeted perforated pass), re-exported, plus the glue to the word dictionary
+//! (`zena-lexicon`): the vision nodes as anchor-bank domains and the dictionary's prompt templates for the anchors.
 
-pub use premium_discount_vision::*;
+pub use lv_screen::*;
 
 /// The text tower and tokenizer, and [`text::compute_anchors`] over the dictionary's prompt templates.
 pub mod text {
-    pub use premium_discount_vision::text::*;
+    pub use lv_screen::text::*;
 
     use anyhow::Result;
 
@@ -19,7 +19,7 @@ pub mod text {
         prompting: &zena_lexicon::VisionPrompting,
         phrases: &[String],
     ) -> Result<Vec<(String, Vec<f32>)>> {
-        premium_discount_vision::text::compute_anchors(text, tok, |p| prompting.forms(p), phrases)
+        lv_screen::text::compute_anchors(text, tok, |p| prompting.forms(p), phrases)
     }
 }
 
@@ -58,7 +58,7 @@ mod tests {
 
     fn unit(seed: f32) -> Vec<f32> {
         let v: Vec<f32> = (0..32).map(|i| ((i as f32 + 1.0) * seed).sin()).collect();
-        premium_discount_vision::tower::unit(v)
+        lv_screen::tower::unit(v)
     }
 
     #[test]

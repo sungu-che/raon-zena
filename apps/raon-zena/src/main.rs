@@ -325,15 +325,18 @@ fn main() -> Result<()> {
         cfg.format = a.screen_format;
         cfg.screen.max_patches = a.screen_patches;
         match a.screen_pass.as_str() {
-            // noto-sandbox's measurements: the perforated pass pays off on the CPU only.
-            "auto" => cfg.screen.perforation = raon_vision::PerforatedCfg::parse("fovea"),
+            // noto-sandbox's measurements: the perforated pass pays off on the CPU only. lv-screen's Auto policy is that
+            // rule with a budget: on a CPU tower a checkerboard first pass and one budgeted opening round (one full pass
+            // when the first pass alone would open more than 65 %), on a GPU the full pass.
+            "auto" => cfg.screen.perforation = raon_vision::PerforationPolicy::Auto,
             "full" => {
-                cfg.screen.perforation = None;
+                cfg.screen.perforation = raon_vision::PerforationPolicy::Off;
                 cfg.perforate_on_cpu_only = false;
             }
             p => {
-                cfg.screen.perforation =
-                    Some(raon_vision::PerforatedCfg::parse(p).ok_or_else(|| anyhow::anyhow!("unknown --screen-pass {p}"))?);
+                cfg.screen.perforation = raon_vision::PerforationPolicy::Forced(
+                    raon_vision::PerforatedCfg::parse(p).ok_or_else(|| anyhow::anyhow!("unknown --screen-pass {p}"))?,
+                );
                 cfg.perforate_on_cpu_only = false;
             }
         }
