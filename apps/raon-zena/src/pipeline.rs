@@ -20,7 +20,7 @@
 
 use crate::browser_uia::{
     build_web_nav_overlay, is_browser_exe, precompute_label_similarity, AsyncBrowserUiaWorker,
-    BrowserSessionTracker, NavBadgeOverlay, ScanRequest, TabTransition,
+    BrowserSessionTracker, NavBadge, NavBadgeOverlay, ScanRequest, TabTransition,
 };
 use crate::capture::FrameSource;
 use crate::lexicon::LexiconMsg;
@@ -700,6 +700,18 @@ pub fn run(
                                 },
                                 false,
                             );
+                            // the choice book (with the visible pool) and this run's checkpoint
+                            if let Some(ov) = active_nav_overlay.as_ref() {
+                                if let Some(b) = ov.badges.iter().find(|b| b.number == number) {
+                                    let labels: Vec<&str> = ov.badges.iter().map(|x| x.label.as_str()).collect();
+                                    let spread = |f: fn(&NavBadge) -> f32| {
+                                        let v: Vec<f32> = ov.badges.iter().map(f).collect();
+                                        v.iter().cloned().fold(f32::MIN, f32::max) - v.iter().cloned().fold(f32::MAX, f32::min)
+                                    };
+                                    let vertical = spread(|x| x.rect.center().0) < spread(|x| x.rect.center().1);
+                                    pd_bridge.on_badge_picked(&active_cc, &active_screen_key, &b.anchor, &b.label, &labels, vertical, wall_ms);
+                                }
+                            }
                             if let Some(accepted) = fatigue.on_target_picked(&active_cc, number, now)
                             {
                                 if let Some(exp) = accepted.exposure() {
@@ -713,6 +725,10 @@ pub fn run(
                     }
                     OverlayAction::ShutdownStarted => {
                         shutting_down = true;
+                        let to_wall = wall_ms - now_i64;
+                        let frozen: Vec<(i64, i64)> =
+                            privacy_sm.active_frozen_spans(now_i64).iter().map(|(a, b)| (a + to_wall, b + to_wall)).collect();
+                        let _ = pd_bridge.on_app_left(&frozen);
                         pd_bridge.shutdown();
                         if let Some(l) = &router.models.sds {
                             let _ = l.lock().unwrap().flush();
@@ -788,20 +804,29 @@ pub fn run(
                     TabTransition::PendingUrlResolution { .. } => {}
                     TabTransition::ActiveTab { cc, page_hash, .. } => {
                         if active_cc != cc {
+                            // leaving an app / site: its checkpoints become a run in the on-device ZoneVault (privacy
+                            // lock spans out, moved from the probe clock to the wall clock the run's day is counted on)
+                            let to_wall = wall_ms - now_i64;
+                            let frozen: Vec<(i64, i64)> =
+                                privacy_sm.active_frozen_spans(now_i64).iter().map(|(a, b)| (a + to_wall, b + to_wall)).collect();
+                            let _ = pd_bridge.on_app_left(&frozen);
                             active_cc = cc.clone();
                             progress_advanced = true;
                         }
                         if let Some(ph) = &page_hash {
                             if active_screen_key != *ph {
-                                if let Some(done) = live_episode.flush_completed(ph, now_i64) {
+                                let done = live_episode.flush_completed(ph, now_i64);
+                                if let Some(done) = &done {
                                     friction_baselines.decide(
                                         &active_cc,
                                         &active_screen_key,
                                         None,
-                                        &done,
+                                        done,
                                         &behavior_params,
                                     );
                                 }
+                                // the 1-hop outcome of the last badge pick, and the new screen as a checkpoint
+                                pd_bridge.on_screen_changed(&active_cc, &active_screen_key, done.as_ref(), ph, &behavior_params, wall_ms);
                                 active_screen_key = ph.clone();
                             }
                         }
@@ -812,7 +837,8 @@ pub fn run(
                         let embedder = router.models.embedder.clone();
                         // Phase 4 Part 3 + Phase 6 Part 3 (`CN2-55`, `CN2-78`):
                         // 빈 `&[]` 대신 3-소스 병합 라이브 `WebAnalyticTierRow` 를 투입한다!
-                        let live_web_rows = pd_bridge.live_web_rows_for_cc(&cc, wall_ms);
+                        let visible_labels: Vec<&str> = snap.regions.iter().map(|r| r.label.as_str()).collect();
+                        let live_web_rows = pd_bridge.live_web_rows_with_choices(&cc, &visible_labels, wall_ms);
                         let label_sim =
                             precompute_label_similarity(&embedder, &live_web_rows, &snap.regions);
                         if let Some((badge_ov, web_brief)) = build_web_nav_overlay(
@@ -1036,6 +1062,7 @@ pub fn run(
                             session.defeat(now);
                             last_defeat_ms = Some(now);
                             just_defeated = true;
+                            pd_bridge.on_defeat(wall_ms);
                             // Phase 7 Part 3 (AC-05): 사용자가 자책/설명을 입력 중이면 패배 방패 창을 보류·연장
                             if user_typing {
                                 defeat_shielded_until_ms = defeat_shielded_until_ms.max(now + 15_000);

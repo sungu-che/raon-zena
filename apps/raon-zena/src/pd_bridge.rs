@@ -30,7 +30,8 @@ use premium_discount_mcp::client::{
     try_lock_for, PdSyncClient, RejectionNotice, SyncLoop, SyncSnapshot, SYNC_INTERVAL,
 };
 use premium_discount_nav::{
-    Collection as NavCollection, Role as NavRole, Run as NavRun, UniversalChoiceBook,
+    app_hash as nav_app_hash, element_hash, BehaviorParams, Checkpoint, Collection as NavCollection, Episode, Gesture, ReduceOptions,
+    Role as NavRole, Run as NavRun, StepKind, UniversalChoiceBook, UniversalChoiceKind, CROSS_BOUNDARY_BOUNCE_WINDOW_MS,
 };
 use premium_discount_relay::{
     curate_cross_scope, supersede_sync, Entry as RelayEntry, QuarantineEntry, QuarantineLedger,
@@ -769,17 +770,57 @@ impl TrajectoryLedger {
 
 /// Phase 5 Part 2 (`CN2-64`): 온디바이스 64-슬롯 구역별 보관함(`ZoneVault`, Pinned-SLRU + `batch_id` 멱등 동기화).
 pub const ZONE_VAULT_MAX_SLOTS: usize = 64;
+/// 한 앱 · 사이트에서 모으는 체크포인트 상한 (오래된 것부터 버린다. 런은 10단계로 솎인다)
+pub const LIVE_RUN_MAX_CHECKPOINTS: usize = 256;
 
-#[derive(Debug, Default, Clone)]
+/// `ZoneVault` 파일: 격리 목록 파일 옆 (`<이름>.zone_vault.json`)
+pub fn zone_vault_path(quarantine_path: &Path) -> PathBuf {
+    quarantine_path.with_extension("zone_vault.json")
+}
+
+/// 1-hop 결과를 기다리는 배지 선택
+#[derive(Debug, Clone)]
+struct PendingPick {
+    key: String,
+    pick_screen: String,
+    /// 고른 화면을 떠날 때 그 화면 에피소드의 마찰
+    same_screen_friction: Option<f64>,
+    /// 도착 화면과 도착 시각
+    arrived: Option<(String, i64)>,
+}
+
+/// 지금 앱 · 사이트에서 모으는 체크포인트
+#[derive(Debug, Clone, Default)]
+struct LiveRunBuffer {
+    cc: String,
+    checkpoints: Vec<Checkpoint>,
+}
+
+#[derive(Debug, Default, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ZoneVault {
     pub collection: NavCollection,
+    #[serde(default)]
     pending_batch: Option<String>,
+    #[serde(default)]
     batch_seq: u64,
 }
 
 impl ZoneVault {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// 기기 안 파일에서 읽는다 (없거나 깨졌으면 빈 보관함). 코스 · 단계 해시와 구간 시간만 들어 있다 (글 · 라벨 없음)
+    pub fn load(path: &Path) -> Self {
+        std::fs::read(path).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default()
+    }
+
+    /// 기기 안 파일에 쓴다 (임시 파일에 쓰고 바꿔 넣는다)
+    pub fn save(&self, path: &Path) -> anyhow::Result<()> {
+        let tmp = path.with_extension("tmp");
+        std::fs::write(&tmp, serde_json::to_vec(self)?)?;
+        std::fs::rename(&tmp, path)?;
+        Ok(())
     }
 
     /// 64-슬롯 Pinned-SLRU 상한으로 완주 기록을 보관한다.
@@ -1814,12 +1855,16 @@ pub struct PdBridge {
     pub prewarm: PrewarmGuard,
     pub vote_gate: OutcomeVoteGate,
     pub quarantine_path: PathBuf,
-    /// Phase 4 Part 3: 웹·인게임·네이티브 통합 선택지 편향 제거 장부.
-    #[allow(dead_code)]
+    /// Phase 4 Part 3: 웹·인게임·네이티브 통합 선택지 편향 제거 장부. 배지 선택([`PdBridge::on_badge_picked`])과 그 뒤 1-hop
+    /// 역류([`PdBridge::on_screen_changed`])를 넣고, 판정은 실시간 배지 등급([`PdBridge::live_web_rows_with_choices`])에 들어간다.
     pub choice_book: UniversalChoiceBook,
-    /// Phase 5 Part 2: 64-슬롯 구역별 Pinned-SLRU 로컬 코스 보관함.
-    #[allow(dead_code)]
+    /// Phase 5 Part 2: 64-슬롯 구역별 Pinned-SLRU 로컬 코스 보관함. 앱 · 사이트를 떠날 때 모은 체크포인트를 런으로 닫아 넣는다
+    /// ([`PdBridge::on_app_left`]).
     pub zone_vault: ZoneVault,
+    /// 1-hop 결과를 기다리는 배지 선택
+    pending_pick: Option<PendingPick>,
+    /// 지금 앱 · 사이트에서 모으는 체크포인트
+    live_run: LiveRunBuffer,
     /// Phase 6 Part 1: 크로스-앱 메타 코스 궤적 원장.
     pub trajectory: TrajectoryLedger,
     /// Phase 4 Part 3 & Phase 6 Part 3: 동기화된 공개 타임트라이얼 체크포인트 / 선행 승격 갈림길 행.
@@ -1877,6 +1922,7 @@ impl PdBridge {
             quarantine,
             deep_opt,
         ));
+        let zone_vault = ZoneVault::load(&zone_vault_path(&quarantine_path));
 
         Self {
             client: client_opt,
@@ -1888,7 +1934,9 @@ impl PdBridge {
             vote_gate: OutcomeVoteGate::new(consent_share_outcomes),
             quarantine_path,
             choice_book: UniversalChoiceBook::default(),
-            zone_vault: ZoneVault::new(),
+            zone_vault,
+            pending_pick: None,
+            live_run: LiveRunBuffer::default(),
             trajectory: TrajectoryLedger::default(),
             public_trial_rows: BTreeMap::new(),
             last_snapshot: SyncSnapshot::default(),
@@ -1896,9 +1944,119 @@ impl PdBridge {
         }
     }
 
+    /// 선택 장부의 열쇠: 같은 라벨이라도 앱 · 사이트마다 따로 센다
+    fn choice_key(cc: &str, label: &str) -> String {
+        format!("{}|{}", normalize_cc(cc), label.trim().to_lowercase())
+    }
+
+    /// 사용자가 배지를 골랐다 (`OverlayAction::BadgePicked`). 보이는 배지 풀과 함께 선택 장부에 넣고(목록이면 위치 감쇠 사전분포),
+    /// 도착 화면을 떠날 때 1-hop 결과를 넣으려고 기다린다. 고른 요소는 이번 런의 체크포인트다
+    #[allow(clippy::too_many_arguments)]
+    pub fn on_badge_picked(&mut self, cc: &str, screen: &str, anchor: &str, label: &str, visible_labels: &[&str], vertical_list: bool, now_ms: i64) {
+        if label.trim().is_empty() {
+            return;
+        }
+        let key = Self::choice_key(cc, label);
+        let keys: Vec<String> = visible_labels.iter().map(|l| Self::choice_key(cc, l)).collect();
+        let refs: Vec<&str> = keys.iter().map(String::as_str).collect();
+        self.choice_book.observe_pick(&key, &refs, vertical_list);
+        self.pending_pick = Some(PendingPick { key, pick_screen: screen.to_string(), same_screen_friction: None, arrived: None });
+        if let Some(h) = element_hash(screen, anchor) {
+            self.push_checkpoint(cc, Checkpoint::new(now_ms, StepKind::Element, h, Some(Gesture::Press)));
+        }
+    }
+
+    /// 화면이 바뀌었다 (`done` = 떠난 화면의 끝난 에피소드). 고른 화면을 떠났으면 그 화면의 마찰을 적고 도착을 기다린다. 도착 화면을
+    /// 떠났으면 머문 시간 · 되돌아옴(8초 안에 고른 화면으로) · 도착 화면 마찰로 1-hop 결과를 넣는다. 새 화면은 체크포인트다
+    pub fn on_screen_changed(&mut self, cc: &str, done_screen: &str, done: Option<&Episode>, next_screen: &str, p: &BehaviorParams, now_ms: i64) {
+        let friction = done.map_or(0.0, |e| e.friction(p));
+        let settled = match self.pending_pick.as_mut() {
+            Some(pp) if pp.arrived.is_none() && pp.pick_screen == done_screen => {
+                pp.same_screen_friction = Some(friction);
+                pp.arrived = Some((next_screen.to_string(), now_ms));
+                None
+            }
+            Some(pp) if pp.arrived.as_ref().is_some_and(|(arrival, _)| arrival == done_screen) => {
+                let at = pp.arrived.as_ref().map_or(now_ms, |(_, at)| *at);
+                let dwell = now_ms - at;
+                let bounce = next_screen == pp.pick_screen && dwell <= CROSS_BOUNDARY_BOUNCE_WINDOW_MS;
+                Some((pp.key.clone(), pp.same_screen_friction.unwrap_or(0.0), dwell, bounce))
+            }
+            _ => None,
+        };
+        if let Some((key, same, dwell, bounce)) = settled {
+            self.choice_book.observe_post_pick_1hop(&key, same, Some(dwell), bounce, friction);
+            self.pending_pick = None;
+        }
+        if !next_screen.trim().is_empty() {
+            self.push_checkpoint(cc, Checkpoint::new(now_ms, StepKind::Screen, next_screen.to_string(), None));
+        }
+    }
+
+    /// 도착 화면에서 졌다 (게임 패배): 고른 배지의 1-hop 결과를 역류로 넣는다
+    pub fn on_defeat(&mut self, now_ms: i64) {
+        if let Some(pp) = self.pending_pick.take() {
+            match pp.arrived {
+                Some((_, at)) => self.choice_book.observe_post_pick_1hop(&pp.key, pp.same_screen_friction.unwrap_or(0.0), Some(now_ms - at), true, 0.0),
+                None => self.pending_pick = Some(pp),
+            }
+        }
+    }
+
+    fn push_checkpoint(&mut self, cc: &str, cp: Checkpoint) {
+        let cc = normalize_cc(cc);
+        if self.live_run.cc != cc {
+            self.live_run = LiveRunBuffer { cc, checkpoints: Vec::new() };
+        }
+        if self.live_run.checkpoints.len() >= LIVE_RUN_MAX_CHECKPOINTS {
+            self.live_run.checkpoints.remove(0);
+        }
+        self.live_run.checkpoints.push(cp);
+    }
+
+    /// 앱 · 사이트를 떠났다 (또는 세션 끝): 모은 체크포인트를 런으로 닫아(개인정보 잠금 · 기다림 동결 구간을 뺀다) 64-슬롯
+    /// `ZoneVault` 에 넣는다. 서버 공개 코스가 30일 뒤 사라져도 이 기기에서 그 코스를 다시 안내할 수 있다. 닫은 런을 돌려준다
+    pub fn on_app_left(&mut self, frozen_spans: &[(i64, i64)]) -> Option<NavRun> {
+        let buf = std::mem::take(&mut self.live_run);
+        self.pending_pick = None;
+        let app = nav_app_hash(&buf.cc)?;
+        let opts = ReduceOptions { frozen_spans, ..ReduceOptions::default() };
+        let run = NavRun::from_checkpoints_with(&app, &buf.checkpoints, None, &opts).ok()?;
+        self.zone_vault.record_run(&run);
+        if let Err(e) = self.zone_vault.save(&zone_vault_path(&self.quarantine_path)) {
+            eprintln!("[pd] zone vault not saved: {e:#}");
+        }
+        Some(run)
+    }
+
+    /// 선택 장부의 판정을 보이는 라벨에 대해 웹 행으로 (아직 표본이 모자란 라벨은 빼고, 함정은 `is_friction_trap`)
+    pub fn choice_rows_for(&self, cc: &str, labels: &[&str]) -> Vec<WebAnalyticTierRow> {
+        labels
+            .iter()
+            .enumerate()
+            .filter_map(|(i, label)| {
+                let kind = self.choice_book.classify(&Self::choice_key(cc, label));
+                (kind != UniversalChoiceKind::UnratedCold).then(|| WebAnalyticTierRow {
+                    label: label.to_string(),
+                    role: NavRole::Button,
+                    ordinal_norm: (i as f32 / labels.len().max(1) as f32).clamp(0.0, 1.0),
+                    tier: kind.tier(),
+                    is_friction_trap: kind == UniversalChoiceKind::FrictionTrap,
+                })
+            })
+            .collect()
+    }
+
+    /// [`PdBridge::live_web_rows_for_cc`] 에 선택 장부를 더한 것: 판정 · 공개 체크포인트가 먼저이고, 선택 장부는 빈 라벨을 채우며,
+    /// 함정 표시는 어느 소스에서 왔든 지킨다
+    pub fn live_web_rows_with_choices(&mut self, cc: &str, labels: &[&str], now_ms: i64) -> Vec<WebAnalyticTierRow> {
+        let rows = self.live_web_rows_for_cc(cc, now_ms);
+        build_live_web_rows(&rows, &self.choice_rows_for(cc, labels), &[])
+    }
+
     /// Phase 4 Part 3 (`CN2-55`) & Phase 6 Part 3 (`CN2-78`):
-    /// 로컬 `LocalVerdictStore` + `UniversalChoiceBook` + 동기화된 `public_trial_rows` 를 3-소스 병합해
-    /// `build_web_nav_overlay` 에 즉시 투입할 `WebAnalyticTierRow` 목록을 반환한다.
+    /// 로컬 `LocalVerdictStore` + 동기화된 `public_trial_rows` 를 병합해 `build_web_nav_overlay` 에 즉시 투입할
+    /// `WebAnalyticTierRow` 목록을 반환한다. 선택 장부까지 더한 것은 [`PdBridge::live_web_rows_with_choices`]
     pub fn live_web_rows_for_cc(&mut self, cc: &str, now_ms: i64) -> Vec<WebAnalyticTierRow> {
         let norm_cc = normalize_cc(cc);
         let q = self.rag.quarantine.lock().unwrap().clone();
@@ -2672,6 +2830,54 @@ mod tests {
         vault.ack_batch(&b1);
         let b3 = vault.next_or_pending_batch_id(3_000);
         assert_ne!(b1, b3);
+    }
+
+    #[test]
+    fn live_loop_feeds_the_choice_book_and_closes_runs_into_the_zone_vault() {
+        let tmp = std::env::temp_dir().join(format!("zena_live_loop_test_{}.json", std::process::id()));
+        let mut b = PdBridge::new(None, SharedEmbedder(Arc::new(HashedNgramEmbedder::default())), Arc::new(AtomicU64::new(0)), Arc::new(AtomicU64::new(0)), false, tmp);
+        let p = BehaviorParams::default();
+        let (cc, list, detail) = ("shop.example", "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb");
+        let (cart, paid) = ("0xcccccccccccccccccccccccccccccccccccccccc", "0xdddddddddddddddddddddddddddddddddddddddd");
+        let labels = ["오늘의 특가", "장바구니", "주문 내역"];
+        let fought = Episode {
+            events: vec![
+                premium_discount_nav::Event { at_ms: 0, signal: premium_discount_nav::Signal::Retried, anchor: Some("#1".into()) },
+                premium_discount_nav::Event { at_ms: 500, signal: premium_discount_nav::Signal::RageClick, anchor: Some("#1".into()) },
+            ],
+        };
+        let mut t = 1_000_000;
+        // the slot-1 promotion: picked again and again, the user fights the detail page and bounces back within 8 s
+        for _ in 0..6 {
+            b.on_badge_picked(cc, list, "a.promo", "오늘의 특가", &labels, true, t);
+            b.on_screen_changed(cc, list, None, detail, &p, t + 500);
+            b.on_screen_changed(cc, detail, Some(&fought), list, &p, t + 3_500);
+            t += 10_000;
+        }
+        // the calm choice: the cart, where the work goes on
+        for _ in 0..3 {
+            b.on_badge_picked(cc, list, "a.cart", "장바구니", &labels, true, t);
+            b.on_screen_changed(cc, list, None, cart, &p, t + 500);
+            b.on_screen_changed(cc, cart, None, paid, &p, t + 30_000);
+            t += 40_000;
+        }
+        let rows = b.choice_rows_for(cc, &labels);
+        let promo = rows.iter().find(|r| r.label == "오늘의 특가").expect("the promotion is rated");
+        assert!(promo.is_friction_trap && promo.tier == Tier::Discount, "{rows:?}");
+        assert!(rows.iter().all(|r| r.label != "주문 내역"), "an unpicked label stays unrated");
+        // the choice book reaches the live overlay rows (no verdicts or public rows here)
+        let live = b.live_web_rows_with_choices(cc, &labels, t);
+        assert!(live.iter().any(|r| r.label == "오늘의 특가" && r.is_friction_trap));
+        // leaving the site closes the run into the 64-slot vault; nothing is gathered after it
+        let run = b.on_app_left(&[]).expect("a run");
+        let app = nav_app_hash(cc).unwrap();
+        assert!(b.zone_vault.collection.courses(&app).iter().any(|c| c.course == run.course));
+        assert!(b.on_app_left(&[]).is_none(), "nothing gathered since");
+        // the vault outlives the process (a public course expired on the server is still here next time)
+        let path = zone_vault_path(&b.quarantine_path);
+        let reopened = ZoneVault::load(&path);
+        assert_eq!(reopened, b.zone_vault);
+        let _ = std::fs::remove_file(&path);
     }
 
     #[test]
